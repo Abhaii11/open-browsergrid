@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
 
 /**
  * Example demonstrating how to connect Playwright to OpenBrowserGrid over CDP.
@@ -12,7 +12,7 @@ async function main() {
   const browser = await chromium.connectOverCDP('ws://localhost:3000/connect');
   console.log('Connected! Creating new page context...');
 
-  const context = browser.contexts()[0] || await browser.newContext();
+  const context = browser.contexts()[0] || (await browser.newContext());
   const page = await context.newPage();
 
   console.log('Navigating to Hacker News (check http://localhost:3000 to watch live)...');

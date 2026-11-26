@@ -13,6 +13,7 @@ export class SessionManager {
   constructor(private config: GridConfig) {
     // Run cleanup check every 10 seconds
     this.reapTimer = setInterval(() => this.reapIdleSessions(), 10000);
+    this.reapTimer.unref();
   }
 
   public async createSession(customId?: string): Promise<BrowserSession> {
@@ -120,10 +121,12 @@ export class SessionManager {
   public registerDashboardSubscriber(ws: WebSocket): void {
     this.dashboardSubscribers.add(ws);
     // Send immediate initial state
-    ws.send(JSON.stringify({
-      type: 'sessions',
-      sessions: this.getSummaries(),
-    }));
+    ws.send(
+      JSON.stringify({
+        type: 'sessions',
+        sessions: this.getSummaries(),
+      })
+    );
 
     ws.on('close', () => {
       this.dashboardSubscribers.delete(ws);

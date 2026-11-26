@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createGridServer } from './server.js';
 import type { GridConfig } from './types.js';
 
@@ -13,10 +16,11 @@ export function runServer(userConfig?: Partial<GridConfig>) {
     port: userConfig?.port || parseInt(process.env.PORT || '3000', 10),
     host: userConfig?.host || process.env.HOST || '0.0.0.0',
     maxSessions: userConfig?.maxSessions || parseInt(process.env.MAX_SESSIONS || '10', 10),
-    sessionTimeoutMs: userConfig?.sessionTimeoutMs || parseInt(process.env.SESSION_TIMEOUT_MS || '300000', 10), // 5 min
+    sessionTimeoutMs:
+      userConfig?.sessionTimeoutMs || parseInt(process.env.SESSION_TIMEOUT_MS || '300000', 10), // 5 min
     apiKey: userConfig?.apiKey || process.env.API_KEY,
-    headless: userConfig?.headless ?? (process.env.HEADLESS !== 'false'),
-    stealth: userConfig?.stealth ?? (process.env.STEALTH !== 'false'),
+    headless: userConfig?.headless ?? process.env.HEADLESS !== 'false',
+    stealth: userConfig?.stealth ?? process.env.STEALTH !== 'false',
     executablePath: userConfig?.executablePath || process.env.CHROME_PATH,
   };
 
@@ -53,6 +57,14 @@ Press Ctrl+C to stop.
 }
 
 // Auto-run if executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runServer();
+const entryArg = process.argv[1];
+if (entryArg) {
+  try {
+    const entryUrl = fileURLToPath(import.meta.url);
+    if (fs.realpathSync(entryUrl) === fs.realpathSync(path.resolve(entryArg))) {
+      runServer();
+    }
+  } catch {
+    // ignore path resolution failures when imported programmatically
+  }
 }

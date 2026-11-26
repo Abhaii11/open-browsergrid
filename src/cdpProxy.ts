@@ -31,11 +31,13 @@ export function setupCdpProxy(
       resolve();
 
       // Enable target discovery to inject stealth script and start screencast on pages
-      browserWs.send(JSON.stringify({
-        id: ++internalMessageId,
-        method: 'Target.setDiscoverTargets',
-        params: { discover: true }
-      }));
+      browserWs.send(
+        JSON.stringify({
+          id: ++internalMessageId,
+          method: 'Target.setDiscoverTargets',
+          params: { discover: true },
+        })
+      );
     });
 
     browserWs.on('error', (err) => {
@@ -72,12 +74,14 @@ export function setupCdpProxy(
           }
 
           // Acknowledge the frame so Chromium continues streaming
-          browserWs.send(JSON.stringify({
-            id: ++internalMessageId,
-            sessionId: frameSessionId,
-            method: 'Page.screencastFrameAck',
-            params: { sessionId: frameSessionId }
-          }));
+          browserWs.send(
+            JSON.stringify({
+              id: ++internalMessageId,
+              sessionId: frameSessionId,
+              method: 'Page.screencastFrameAck',
+              params: { sessionId: frameSessionId },
+            })
+          );
         }
 
         // If a page target is attached, inject stealth script and start screencasting
@@ -85,29 +89,33 @@ export function setupCdpProxy(
           const targetSessionId = msg.params.sessionId;
 
           if (config.stealth) {
-            browserWs.send(JSON.stringify({
-              id: ++internalMessageId,
-              sessionId: targetSessionId,
-              method: 'Page.addScriptToEvaluateOnNewDocument',
-              params: { source: STEALTH_INJECTION_SCRIPT }
-            }));
+            browserWs.send(
+              JSON.stringify({
+                id: ++internalMessageId,
+                sessionId: targetSessionId,
+                method: 'Page.addScriptToEvaluateOnNewDocument',
+                params: { source: STEALTH_INJECTION_SCRIPT },
+              })
+            );
           }
 
           // Start screencast for the web viewer
           if (!screencastStarted) {
             screencastStarted = true;
-            browserWs.send(JSON.stringify({
-              id: ++internalMessageId,
-              sessionId: targetSessionId,
-              method: 'Page.startScreencast',
-              params: {
-                format: 'jpeg',
-                quality: 65,
-                maxWidth: 1280,
-                maxHeight: 800,
-                everyNthFrame: 1
-              }
-            }));
+            browserWs.send(
+              JSON.stringify({
+                id: ++internalMessageId,
+                sessionId: targetSessionId,
+                method: 'Page.startScreencast',
+                params: {
+                  format: 'jpeg',
+                  quality: 65,
+                  maxWidth: 1280,
+                  maxHeight: 800,
+                  everyNthFrame: 1,
+                },
+              })
+            );
           }
         }
 

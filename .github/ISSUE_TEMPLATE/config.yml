@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability
+    url: https://github.com/Abhaii11/open-browsergrid/blob/main/SECURITY.md
+    about: Please do not report security vulnerabilities publicly. Follow SECURITY.md instead.
+  - name: Contributing Guide
+    url: https://github.com/Abhaii11/open-browsergrid/blob/main/CONTRIBUTING.md
+    about: Read our setup and development guidelines before opening a PR.

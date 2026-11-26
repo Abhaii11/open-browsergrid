@@ -2,15 +2,48 @@
   "name": "open-browsergrid",
   "version": "0.1.0",
   "description": "High-performance, self-hosted headless browser infrastructure for AI agents and automation. Open-source alternative to Browserbase, Browserless, and Steel.",
+  "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "browsergrid": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abhaii11/open-browsergrid.git"
+  },
+  "homepage": "https://github.com/Abhaii11/open-browsergrid#readme",
+  "bugs": {
+    "url": "https://github.com/Abhaii11/open-browsergrid/issues"
+  },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "test": "node --test"
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,js,mjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,yml,yaml}": [
+      "prettier --write"
+    ]
   },
   "keywords": [
     "browser",
@@ -25,15 +58,22 @@
     "stealth"
   ],
   "author": "Abhaii11",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "dependencies": {
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.17.0",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
     "playwright-core": "^1.49.1",
+    "prettier": "^3.4.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.19.0"
   }
 }

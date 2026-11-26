@@ -1,9 +1,20 @@
-# Production Dockerfile for OpenBrowserGrid
+# Production multi-stage Dockerfile for OpenBrowserGrid
 # Lightweight, containerized headless Chromium with stealth mode and web dashboard
 
+# Stage 1: Build TypeScript sources
+FROM node:22-bullseye-slim AS builder
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# Stage 2: Production runtime with Chromium
 FROM node:22-bullseye-slim
 
-# Install system dependencies required for Chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     fonts-liberation \
@@ -44,7 +55,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chrome binary environment variable
 ENV CHROME_PATH=/usr/bin/chromium
 ENV PORT=3000
 ENV HOST=0.0.0.0
@@ -52,15 +62,15 @@ ENV NODE_ENV=production
 
 WORKDIR /app
 
-# Install dependencies and build
 COPY package*.json ./
-RUN npm ci --omit=dev || npm install --omit=dev
+RUN npm ci --omit=dev && npm cache clean --force
 
-COPY . .
-RUN npm run build || true
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-# Use dumb-init to properly handle PID 1 signals and avoid zombie processes
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["node", "dist/index.js"]

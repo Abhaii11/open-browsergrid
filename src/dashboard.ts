@@ -302,9 +302,9 @@ export function getDashboardHtml(port: number): string {
       <div class="panel">
         <h2>Connect Snippet</h2>
         <div class="tabs">
-          <button class="tab active" onclick="showSnippet('playwright')">Playwright (TS/JS)</button>
-          <button class="tab" onclick="showSnippet('python')">Python (browser-use)</button>
-          <button class="tab" onclick="showSnippet('puppeteer')">Puppeteer</button>
+          <button class="tab active" data-tab="playwright" onclick="showSnippet('playwright')">Playwright (TS/JS)</button>
+          <button class="tab" data-tab="python" onclick="showSnippet('python')">Python (browser-use)</button>
+          <button class="tab" data-tab="puppeteer" onclick="showSnippet('puppeteer')">Puppeteer</button>
         </div>
         <div class="connect-box" id="code-snippet"></div>
       </div>
@@ -356,9 +356,19 @@ await page.goto('https://example.com');
 await browser.close();\`
     };
 
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     function showSnippet(type) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      event.target.classList.add('active');
+      document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.getAttribute('data-tab') === type);
+      });
       document.getElementById('code-snippet').textContent = snippets[type];
     }
     showSnippet('playwright');
@@ -400,13 +410,13 @@ await browser.close();\`
       }
 
       list.innerHTML = sessions.map(s => \`
-        <div class="session-card \${s.id === activeSessionId ? 'active' : ''}" onclick="selectSession('\${s.id}')">
+        <div class="session-card \${s.id === activeSessionId ? 'active' : ''}" onclick="selectSession('\${escapeHtml(s.id)}')">
           <div class="session-header">
-            <span class="session-id">\${s.id}</span>
-            <span class="status-pill status-\${s.status}">\${s.status}</span>
+            <span class="session-id">\${escapeHtml(s.id)}</span>
+            <span class="status-pill status-\${escapeHtml(s.status)}">\${escapeHtml(s.status)}</span>
           </div>
           <div class="session-meta">
-            <span>\${s.title || 'Untitled Page'}</span>
+            <span>\${escapeHtml(s.title || 'Untitled Page')}</span>
             <span>Uptime: \${s.uptimeSeconds}s | Msgs: \${s.metrics.messagesProxied}</span>
           </div>
         </div>

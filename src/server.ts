@@ -1,15 +1,24 @@
 import * as http from 'node:http';
-import { parse as parseUrl } from 'node:url';
-import WebSocket, { WebSocketServer } from 'ws';
+import type { AddressInfo } from 'node:net';
+import { WebSocketServer } from 'ws';
 import { getDashboardHtml } from './dashboard.js';
 import { SessionManager } from './sessionManager.js';
 import type { GridConfig } from './types.js';
 
+function parseRequestUrl(rawUrl?: string): URL {
+  try {
+    return new URL(rawUrl || '/', 'http://localhost');
+  } catch {
+    return new URL('/', 'http://localhost');
+  }
+}
+
 export function createGridServer(config: GridConfig) {
   const sessionManager = new SessionManager(config);
+  let boundPort = config.port;
 
   const server = http.createServer(async (req, res) => {
-    const parsed = parseUrl(req.url || '/', true);
+    const parsed = parseRequestUrl(req.url);
     const pathname = parsed.pathname || '/';
 
     // CORS headers for API access
@@ -37,20 +46,22 @@ export function createGridServer(config: GridConfig) {
     // Dashboard UI
     if (pathname === '/' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(getDashboardHtml(config.port));
+      res.end(getDashboardHtml(boundPort));
       return;
     }
 
     // Health check
     if (pathname === '/health' || pathname === '/api/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        status: 'ok',
-        version: '0.1.0',
-        activeSessions: sessionManager.getAllSessions().length,
-        maxSessions: config.maxSessions,
-        uptime: process.uptime(),
-      }));
+      res.end(
+        JSON.stringify({
+          status: 'ok',
+          version: '0.1.0',
+          activeSessions: sessionManager.getAllSessions().length,
+          maxSessions: config.maxSessions,
+          uptime: process.uptime(),
+        })
+      );
       return;
     }
 
@@ -66,15 +77,18 @@ export function createGridServer(config: GridConfig) {
       try {
         const session = await sessionManager.createSession();
         res.writeHead(201, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          id: session.id,
-          wsEndpoint: `ws://${config.host}:${config.port}/connect/${session.id}`,
-          status: session.status,
-          createdAt: session.createdAt,
-        }));
-      } catch (err: any) {
+        res.end(
+          JSON.stringify({
+            id: session.id,
+            wsEndpoint: `ws://${config.host}:${boundPort}/connect/${session.id}`,
+            status: session.status,
+            createdAt: session.createdAt,
+          })
+        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
+        res.end(JSON.stringify({ error: message }));
       }
       return;
     }
@@ -102,14 +116,15 @@ export function createGridServer(config: GridConfig) {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', async (req, socket, head) => {
-    const parsed = parseUrl(req.url || '/', true);
+    const parsed = parseRequestUrl(req.url);
     const pathname = parsed.pathname || '';
 
     // Auth check on upgrade
     if (config.apiKey) {
       const authHeader = req.headers['authorization'] || req.headers['x-api-key'];
-      const queryKey = parsed.query.token || parsed.query.apiKey;
-      const token = (typeof authHeader === 'string' ? authHeader.replace(/^Bearer\s+/, '') : '') || queryKey;
+      const queryKey = parsed.searchParams.get('token') || parsed.searchParams.get('apiKey');
+      const token =
+        (typeof authHeader === 'string' ? authHeader.replace(/^Bearer\s+/, '') : '') || queryKey;
       if (token !== config.apiKey) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
@@ -135,8 +150,9 @@ export function createGridServer(config: GridConfig) {
 
         try {
           await sessionManager.attachClient(requestedId || '', clientWs);
-        } catch (err: any) {
-          clientWs.close(1011, `Failed to attach session: ${err.message}`);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          clientWs.close(1011, `Failed to attach session: ${message}`);
         }
       });
       return;
@@ -149,16 +165,21 @@ export function createGridServer(config: GridConfig) {
   return {
     server,
     sessionManager,
-    start: () => new Promise<void>((resolve) => {
-      server.listen(config.port, config.host, () => {
-        resolve();
-      });
-    }),
+    start: () =>
+      new Promise<void>((resolve) => {
+        server.listen(config.port, config.host, () => {
+          const address = server.address() as AddressInfo | null;
+          if (address && typeof address.port === 'number') {
+            boundPort = address.port;
+          }
+          resolve();
+        });
+      }),
     stop: async () => {
       await sessionManager.shutdown();
       return new Promise<void>((resolve) => {
         server.close(() => resolve());
       });
-    }
+    },
   };
 }

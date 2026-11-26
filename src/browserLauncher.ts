@@ -75,7 +75,7 @@ export function findBrowserExecutable(customPath?: string): string {
 
   throw new Error(
     `No Chromium or Chrome executable found on this system (${platform}). ` +
-    `Please set CHROME_PATH or install Google Chrome / Chromium.`
+      `Please set CHROME_PATH or install Google Chrome / Chromium.`
   );
 }
 
@@ -149,7 +149,9 @@ export async function launchBrowserSession(
 
     const onData = (data: Buffer) => {
       const text = data.toString('utf-8');
-      const match = text.match(/DevTools listening on (ws:\/\/127\.0\.0\.1:(\d+)\/devtools\/browser\/[a-zA-Z0-9_-]+)/);
+      const match = text.match(
+        /DevTools listening on (ws:\/\/127\.0\.0\.1:(\d+)\/devtools\/browser\/[a-zA-Z0-9_-]+)/
+      );
       if (match) {
         endpoint = match[1];
         port = parseInt(match[2], 10);

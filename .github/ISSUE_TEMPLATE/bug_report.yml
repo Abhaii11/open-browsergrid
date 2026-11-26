@@ -1,0 +1,70 @@
+name: Bug Report
+description: Report a crash, browser connection failure, or unexpected behavior in OpenBrowserGrid
+title: '[Bug]: '
+labels: ['bug', 'triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue! Please provide as much detail as possible so we can reproduce and fix it quickly.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: Connecting via Playwright throws a WebSocket 1011 error after 30s...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal code snippet or commands to reproduce the issue.
+      placeholder: |
+        1. Start OpenBrowserGrid via `docker compose up`
+        2. Run `chromium.connectOverCDP('ws://localhost:3000/connect')`
+        3. Navigate to `https://example.com`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running OpenBrowserGrid?
+      options:
+        - Docker / Docker Compose
+        - Node.js CLI (`browsergrid` / `npm start`)
+        - Programmatic Node.js API
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: Automation Client
+      options:
+        - Playwright (Node.js / TypeScript)
+        - Playwright (Python)
+        - browser-use
+        - Puppeteer
+        - Raw CDP / Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node.js version, and OpenBrowserGrid version or commit hash.
+      placeholder: macOS 15 / Ubuntu 24.04, Node 22.11, v0.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Please paste any server or client error output (remove any API keys).
+      render: shell

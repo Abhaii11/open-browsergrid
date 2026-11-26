@@ -5,7 +5,8 @@
 ### Self-Hosted Cloud Browser Infrastructure for AI Agents & Automation
 **Open-Source Alternative to Browserbase, Browserless, and Steel**
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/Abhaii11/open-browsergrid/actions/workflows/ci.yml/badge.svg)](https://github.com/Abhaii11/open-browsergrid/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 [![TypeScript](https://img.shields.io/badge/built%20with-TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Playwright](https://img.shields.io/badge/compatible%20with-Playwright-2EAD33?logo=playwright&logoColor=white)](https://playwright.dev/)
@@ -36,7 +37,7 @@ Running headless Chromium for AI agents (like `browser-use`, `Stagehand`, or cus
 **OpenBrowserGrid solves all four:**
 - 🛡️ **Stealth Anti-Detection by Default**: Masks `navigator.webdriver`, mocks `chrome.runtime`, and patches browser fingerprints.
 - 📺 **Live Web Dashboard with Screencasting**: Watch what your AI agent or Playwright test is doing in real-time at 30fps.
-- ⚡ **Zero Cloud Cost**: Deploy in seconds on any \$5 VPS, home lab, or Docker host.
+- ⚡ **Zero Cloud Cost**: Deploy in seconds on any $5 VPS, home lab, or Docker host.
 - 🔌 **100% Drop-in Compatible**: Connect with standard Playwright `connectOverCDP()`, Puppeteer, or Python `browser-use`.
 
 ---
@@ -154,7 +155,7 @@ await browser.close();
 
 | Feature | OpenBrowserGrid | Browserbase | Browserless |
 | :--- | :---: | :---: | :---: |
-| **Pricing** | **100% Free & Open-Source** | \$49 - \$299/mo | \$50 - \$250/mo |
+| **Pricing** | **100% Free & Open-Source** | $49 - $299/mo | $50 - $250/mo |
 | **Self-Hostable** | ✅ **One-Line Docker** | ❌ Proprietary Cloud | ⚠️ Complex Enterprise Setup |
 | **Live Visual Screencast** | ✅ Built-in Dark Mode UI | ✅ Web UI | ⚠️ Separate VNC |
 | **Anti-Bot Stealth** | ✅ Built-in | ✅ Built-in | ⚠️ Paid Addon |
@@ -194,7 +195,7 @@ await browser.close();
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
-Feel free to check [issues page](https://github.com/Abhaii11/open-browsergrid/issues).
+Please read our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md), or open an issue on the [issues page](https://github.com/Abhaii11/open-browsergrid/issues).
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feat/amazing-feature`)
@@ -204,6 +205,12 @@ Feel free to check [issues page](https://github.com/Abhaii11/open-browsergrid/is
 
 ---
 
+## 🔒 Security
+
+Please see [SECURITY.md](SECURITY.md) for deployment hardening guidance and responsible vulnerability reporting.
+
+---
+
 ## 📄 License
 
-Distributed under the Apache-2.0 License. See `LICENSE` for more information.
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.

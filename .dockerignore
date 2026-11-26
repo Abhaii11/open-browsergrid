@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.github
+.husky
+.DS_Store
+*.log
+coverage
+test-results
