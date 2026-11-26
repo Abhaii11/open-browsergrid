@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Align package metadata and documentation with MIT `LICENSE`
 - Fix ESM module configuration (`"type": "module"`) for NodeNext compilation and native tests
 - Fix dashboard snippet tab initialization and escape rendered session HTML
-- Convert `Dockerfile` to multi-stage build so TypeScript compiles cleanly
+- Fix Dockerfile `npm ci --omit=dev` failing on `prepare` husky hook by passing `--ignore-scripts` and upgrading base image to Debian Bookworm
+- Fix test runner discovery compatibility on Node.js 20 LTS via `scripts/run-tests.mjs`
 
 ## [0.1.0] - 2026-11-26
 
