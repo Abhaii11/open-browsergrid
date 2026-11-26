@@ -1,0 +1,22 @@
+services:
+  browsergrid:
+    image: ghcr.io/abhaii11/open-browsergrid:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: open-browsergrid
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - MAX_SESSIONS=10
+      - SESSION_TIMEOUT_MS=300000
+      - STEALTH=true
+      - HEADLESS=true
+      # Optional: set API_KEY to require authentication
+      # - API_KEY=your_secret_token_here
+    shm_size: 2gb
+    security_opt:
+      - seccomp=unconfined

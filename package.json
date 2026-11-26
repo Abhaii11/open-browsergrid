@@ -1,0 +1,39 @@
+{
+  "name": "open-browsergrid",
+  "version": "0.1.0",
+  "description": "High-performance, self-hosted headless browser infrastructure for AI agents and automation. Open-source alternative to Browserbase, Browserless, and Steel.",
+  "main": "dist/index.js",
+  "bin": {
+    "browsergrid": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "node --test"
+  },
+  "keywords": [
+    "browser",
+    "headless-chrome",
+    "playwright",
+    "puppeteer",
+    "browserbase",
+    "browserless",
+    "ai-agents",
+    "browser-use",
+    "cdp",
+    "stealth"
+  ],
+  "author": "Abhaii11",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "playwright-core": "^1.49.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
