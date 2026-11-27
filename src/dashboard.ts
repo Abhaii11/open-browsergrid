@@ -409,7 +409,12 @@ await browser.close();\`
         return;
       }
 
-      list.innerHTML = sessions.map(s => \`
+      list.innerHTML = sessions.map(s => {
+        const metaTags = s.metadata ? Object.entries(s.metadata)
+          .map(([k, v]) => \`<span class="status-pill" style="background: rgba(148,163,184,0.12); color: var(--text-muted); font-size: 0.7rem;">\${escapeHtml(k)}=\${escapeHtml(v)}</span>\`)
+          .join(' ') : '';
+        const memInfo = typeof s.memoryMb === 'number' ? \` | RAM: \${s.memoryMb}MB\` : '';
+        return \`
         <div class="session-card \${s.id === activeSessionId ? 'active' : ''}" onclick="selectSession('\${escapeHtml(s.id)}')">
           <div class="session-header">
             <span class="session-id">\${escapeHtml(s.id)}</span>
@@ -417,10 +422,12 @@ await browser.close();\`
           </div>
           <div class="session-meta">
             <span>\${escapeHtml(s.title || 'Untitled Page')}</span>
-            <span>Uptime: \${s.uptimeSeconds}s | Msgs: \${s.metrics.messagesProxied}</span>
+            <span>Uptime: \${s.uptimeSeconds}s | Msgs: \${s.metrics.messagesProxied}\${memInfo}</span>
+            \${metaTags ? \`<div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin-top:0.25rem;">\${metaTags}</div>\` : ''}
           </div>
         </div>
-      \`).join('');
+      \`;
+      }).join('');
 
       if (!activeSessionId && sessions.length > 0) {
         selectSession(sessions[0].id);

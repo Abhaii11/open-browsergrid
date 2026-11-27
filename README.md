@@ -172,6 +172,12 @@ await browser.close();
 | `HOST` | `0.0.0.0` | Host interface to bind |
 | `MAX_SESSIONS` | `10` | Maximum simultaneous browser sessions allowed |
 | `SESSION_TIMEOUT_MS` | `300000` | Idle timeout before cleaning up unused sessions (5 min) |
+| `QUEUE_TIMEOUT_MS` | `15000` | Max wait time for a browser slot when pool is full (`0` disables queue) |
+| `MAX_QUEUE_SIZE` | `25` | Maximum waiting session requests when at `MAX_SESSIONS` |
+| `MAX_SESSION_MEMORY_MB` | `0` | Auto-kill sessions exceeding RSS memory in MiB (`0` disables) |
+| `HEARTBEAT_INTERVAL_MS` | `15000` | WebSocket ping/pong heartbeat interval (`0` disables) |
+| `LOG_LEVEL` | `info` | Structured log level (`debug`, `info`, `warn`, `error`, `silent`) |
+| `LOG_FORMAT` | `pretty` / `json` | Output format (`json` defaults when `NODE_ENV=production`) |
 | `STEALTH` | `true` | Enable anti-detection flags and runtime patches |
 | `HEADLESS` | `true` | Run Chromium in headless mode |
 | `API_KEY` | *(None)* | Optional Bearer token / API key to require for connections |

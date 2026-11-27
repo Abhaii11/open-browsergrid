@@ -1,13 +1,26 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { Logger } from './logger.js';
 import { STEALTH_LAUNCH_FLAGS } from './stealth.js';
-import type { GridConfig } from './types.js';
+import { InvalidSessionIdError, type GridConfig } from './types.js';
+
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+
+export function validateSessionId(sessionId: string): string {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    throw new InvalidSessionIdError(sessionId);
+  }
+  return sessionId;
+}
 
 export function findBrowserExecutable(customPath?: string): string {
-  if (customPath && fs.existsSync(customPath)) {
-    return customPath;
+  if (customPath) {
+    if (fs.existsSync(customPath)) {
+      return customPath;
+    }
+    throw new Error(`Configured browser executable does not exist: ${customPath}`);
   }
   if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
     return process.env.CHROME_PATH;
@@ -79,25 +92,13 @@ export function findBrowserExecutable(customPath?: string): string {
   );
 }
 
-export interface LaunchResult {
-  process: ChildProcess;
-  wsEndpoint: string;
-  cdpPort: number;
-  userDataDir: string;
-}
-
-export async function launchBrowserSession(
-  sessionId: string,
-  config: GridConfig
-): Promise<LaunchResult> {
-  const executable = findBrowserExecutable(config.executablePath);
-  const baseDir = config.userDataDirBase || os.tmpdir();
-  const userDataDir = path.join(baseDir, `browsergrid-session-${sessionId}`);
-  fs.mkdirSync(userDataDir, { recursive: true });
-
+export function buildLaunchArgs(
+  userDataDir: string,
+  config: Pick<GridConfig, 'headless' | 'stealth'>
+): string[] {
   const args = [
     `--user-data-dir=${userDataDir}`,
-    '--remote-debugging-port=0', // dynamic unused port
+    '--remote-debugging-port=0',
     '--remote-debugging-address=127.0.0.1',
     '--no-sandbox',
     '--disable-gpu',
@@ -127,8 +128,114 @@ export async function launchBrowserSession(
     args.push(...STEALTH_LAUNCH_FLAGS);
   }
 
-  // Open blank page
   args.push('about:blank');
+  return args;
+}
+
+export async function cleanupUserDataDir(dir: string, logger?: Logger): Promise<void> {
+  if (!dir) return;
+  const delays = [0, 75, 200];
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i] > 0) {
+      await new Promise((r) => setTimeout(r, delays[i]));
+    }
+    try {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (i === delays.length - 1) {
+        logger?.warn('Failed to remove temporary user data directory', {
+          userDataDir: dir,
+          err,
+        });
+      }
+    }
+  }
+}
+
+export async function terminateProcess(child: ChildProcess, graceMs = 1500): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let resolved = false;
+    const done = () => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(killTimer);
+        clearTimeout(finalTimer);
+        child.removeListener('exit', done);
+        resolve();
+      }
+    };
+
+    child.once('exit', done);
+
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      done();
+      return;
+    }
+
+    const killTimer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // already exited
+      }
+    }, graceMs);
+    killTimer.unref();
+
+    // Ensure promise never hangs even if OS delays SIGKILL exit notification
+    const finalTimer = setTimeout(done, graceMs + 500);
+    finalTimer.unref();
+  });
+}
+
+export function getProcessMemoryMb(pid: number | undefined): Promise<number | undefined> {
+  if (!pid || os.platform() === 'win32') {
+    return Promise.resolve(undefined);
+  }
+
+  return new Promise((resolve) => {
+    execFile('ps', ['-o', 'rss=', '-p', String(pid)], (err, stdout) => {
+      if (err) {
+        resolve(undefined);
+        return;
+      }
+      const rssKb = Number.parseInt(stdout.trim(), 10);
+      if (Number.isNaN(rssKb) || rssKb <= 0) {
+        resolve(undefined);
+        return;
+      }
+      resolve(Math.round((rssKb / 1024) * 10) / 10);
+    });
+  });
+}
+
+export interface LaunchResult {
+  process: ChildProcess;
+  wsEndpoint: string;
+  cdpPort: number;
+  userDataDir: string;
+}
+
+export type SessionLauncher = (sessionId: string, config: GridConfig) => Promise<LaunchResult>;
+
+export async function launchBrowserSession(
+  sessionId: string,
+  config: GridConfig,
+  logger?: Logger
+): Promise<LaunchResult> {
+  validateSessionId(sessionId);
+  const executable = findBrowserExecutable(config.executablePath);
+  const baseDir = config.userDataDirBase || os.tmpdir();
+  const userDataDir = path.join(baseDir, `browsergrid-session-${sessionId}`);
+  await fs.promises.mkdir(userDataDir, { recursive: true });
+
+  const args = buildLaunchArgs(userDataDir, config);
 
   return new Promise<LaunchResult>((resolve, reject) => {
     const child = spawn(executable, args, {
@@ -137,54 +244,64 @@ export async function launchBrowserSession(
     });
 
     let settled = false;
-    let endpoint = '';
-    let port = 0;
-    const timeout = setTimeout(() => {
-      if (!settled) {
-        settled = true;
+    let stderrTail = '';
+
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try {
         child.kill('SIGKILL');
-        reject(new Error(`Timed out waiting for Chrome CDP endpoint for session ${sessionId}`));
+      } catch {
+        // ignore
       }
+      void cleanupUserDataDir(userDataDir, logger);
+      reject(err);
+    };
+
+    const timeout = setTimeout(() => {
+      fail(new Error(`Timed out waiting for Chrome CDP endpoint for session ${sessionId}`));
     }, 15000);
+    timeout.unref();
 
     const onData = (data: Buffer) => {
       const text = data.toString('utf-8');
+      stderrTail = (stderrTail + text).slice(-1024);
       const match = text.match(
         /DevTools listening on (ws:\/\/127\.0\.0\.1:(\d+)\/devtools\/browser\/[a-zA-Z0-9_-]+)/
       );
-      if (match) {
-        endpoint = match[1];
-        port = parseInt(match[2], 10);
-        if (!settled) {
-          settled = true;
-          clearTimeout(timeout);
-          resolve({
-            process: child,
-            wsEndpoint: endpoint,
-            cdpPort: port,
-            userDataDir,
-          });
-        }
+      if (match && !settled) {
+        settled = true;
+        clearTimeout(timeout);
+        child.stdout?.removeListener('data', onData);
+        child.stderr?.removeListener('data', onData);
+        child.removeListener('error', onError);
+        child.removeListener('exit', onExit);
+        resolve({
+          process: child,
+          wsEndpoint: match[1],
+          cdpPort: Number.parseInt(match[2], 10),
+          userDataDir,
+        });
       }
+    };
+
+    const onError = (err: Error) => {
+      fail(err);
+    };
+
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      const details = stderrTail.trim() ? ` (${stderrTail.trim()})` : '';
+      fail(
+        new Error(
+          `Browser exited prematurely with code=${code ?? 'null'} signal=${signal ?? 'null'}${details}`
+        )
+      );
     };
 
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
-
-    child.on('error', (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        reject(err);
-      }
-    });
-
-    child.on('exit', (code) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        reject(new Error(`Browser exited prematurely with code ${code}`));
-      }
-    });
+    child.on('error', onError);
+    child.on('exit', onExit);
   });
 }

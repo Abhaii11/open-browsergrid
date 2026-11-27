@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Structured logger (`src/logger.ts`) with JSON/pretty formatting and `LOG_LEVEL` support
+- Shared configuration resolver (`src/config.ts`) and expanded CLI flags (`--queue-timeout`, `--max-queue`, `--max-memory-mb`, `--log-level`, `--log-format`)
+- Concurrent slot reservation, FIFO session queuing (`QUEUE_TIMEOUT_MS`, `MAX_QUEUE_SIZE`), and named session re-attachment
+- Automatic crash recovery on unexpected Chromium exits and memory RSS watchdog (`MAX_SESSION_MEMORY_MB`)
+- WebSocket ping/pong heartbeat and early CDP client frame buffering during browser startup
+- Session metadata tags (`metadata`, `tag_*` / `meta_*` query params) and `GET /api/sessions/:id` endpoint
+- Expanded unit and integration test suites under `tests/unit/` and `tests/integration/`
 - Community documentation (`CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`)
 - Structured GitHub issue templates and PR checklist template
 - GitHub Actions CI pipeline (lint, format check, typecheck, build, test, Docker verification)
