@@ -256,11 +256,9 @@ export async function terminateProcess(child: ChildProcess, graceMs = 1500): Pro
         // already exited
       }
     }, graceMs);
-    killTimer.unref();
 
     // Ensure promise never hangs even if OS delays SIGKILL exit notification
     const finalTimer = setTimeout(done, graceMs + 500);
-    finalTimer.unref();
   });
 }
 
@@ -339,7 +337,6 @@ export async function launchBrowserSession(
     const timeout = setTimeout(() => {
       fail(new Error(`Timed out waiting for Chrome CDP endpoint for session ${sessionId}`));
     }, 15000);
-    timeout.unref();
 
     const onData = (data: Buffer) => {
       const text = data.toString('utf-8');

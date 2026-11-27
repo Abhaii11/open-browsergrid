@@ -224,7 +224,6 @@ export class SessionManager {
           reject(new QueueTimeoutError(this.config.maxSessions, queueTimeoutMs));
         }, queueTimeoutMs),
       };
-      waiter.timer.unref();
       this.waitQueue.push(waiter);
       this.logger.debug('Queued session request', { queueLength: this.waitQueue.length });
     });
