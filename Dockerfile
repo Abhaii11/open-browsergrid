@@ -2,7 +2,7 @@
 # Lightweight, containerized headless Chromium with stealth mode and web dashboard
 
 # Stage 1: Build TypeScript sources
-FROM node:22-bookworm-slim@sha256:be979e5523c76fa4d5ca4ebd3099078f220aa47ec39c48ad5b5df9314debd6eb AS builder
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS builder
 
 WORKDIR /app
 COPY package*.json ./
@@ -13,7 +13,7 @@ COPY src ./src
 RUN npm run build
 
 # Stage 2: Production runtime with Chromium
-FROM node:22-bookworm-slim@sha256:be979e5523c76fa4d5ca4ebd3099078f220aa47ec39c48ad5b5df9314debd6eb
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
