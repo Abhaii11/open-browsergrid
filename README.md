@@ -6,6 +6,8 @@
 **Open-Source Alternative to Browserbase, Browserless, and Steel**
 
 [![CI](https://github.com/Abhaii11/open-browsergrid/actions/workflows/ci.yml/badge.svg)](https://github.com/Abhaii11/open-browsergrid/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Abhaii11/open-browsergrid/actions/workflows/codeql.yml/badge.svg)](https://github.com/Abhaii11/open-browsergrid/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Abhaii11/open-browsergrid/badge)](https://scorecard.dev/viewer/?uri=github.com/Abhaii11/open-browsergrid)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 [![TypeScript](https://img.shields.io/badge/built%20with-TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)

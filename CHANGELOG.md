@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- OpenSSF Scorecard GitHub Action workflow (`scorecard.yml`), CodeQL SAST workflow (`codeql.yml`), and Dependabot automation (`dependabot.yml`) for `npm`, `github-actions`, and `docker`
+- Immutable SHA pinning for all GitHub Actions workflows and multi-arch `Dockerfile` base image digest, plus OpenSSF Scorecard and CodeQL badges in `README.md`
 - Advanced stealth profile engine (`resolveStealthProfile`, `buildStealthScript`) with per-session WebGL vendor/renderer spoofing, seeded Canvas LSB & AudioContext fingerprint jitter, Client Hints/User-Agent CDP override, and timezone/locale consistency
 - Persistent browser profiles (`profileId`, `PROFILES_DIR`, `--profiles-dir`) with conflict protection (`409 Conflict`) and `/api/profiles` management endpoints
 - Structured logger (`src/logger.ts`) with JSON/pretty formatting and `LOG_LEVEL` support
