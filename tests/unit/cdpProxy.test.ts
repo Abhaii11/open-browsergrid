@@ -45,7 +45,13 @@ test('setupCdpProxy terminates unresponsive client when heartbeat pong is missed
 
     const serverSideClientWs = await new Promise<WebSocket>((resolve, reject) => {
       raw.once('error', reject);
-      clientServerWss.once('connection', (ws) => resolve(ws));
+      clientServerWss.once('connection', (ws) => {
+        raw.removeListener('error', reject);
+        raw.on('error', () => {
+          // Ignore ECONNRESET when server force-terminates client socket during heartbeat eviction
+        });
+        resolve(ws);
+      });
     });
 
     let pingCount = 0;
@@ -85,6 +91,9 @@ test('setupCdpProxy terminates unresponsive client when heartbeat pong is missed
     assert.strictEqual(terminated, true);
   } finally {
     rawClient?.terminate();
+    for (const client of mockBrowserWss.clients) {
+      client.terminate();
+    }
     await Promise.all([
       new Promise<void>((resolve) => clientServerWss.close(() => resolve())),
       new Promise<void>((resolve) => mockBrowserWss.close(() => resolve())),

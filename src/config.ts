@@ -1,3 +1,5 @@
+import * as os from 'node:os';
+import * as path from 'node:path';
 import process from 'node:process';
 import { resolveLogFormat, resolveLogLevel } from './logger.js';
 import type { GridConfig, ResolvedGridConfig } from './types.js';
@@ -10,6 +12,11 @@ function parseIntWithDefault(raw: string | undefined, fallback: number, min: num
 }
 
 export function resolveGridConfig(userConfig: Partial<GridConfig> = {}): ResolvedGridConfig {
+  const defaultProfilesDir = path.join(
+    userConfig.userDataDirBase || process.env.USER_DATA_DIR_BASE || os.tmpdir(),
+    'browsergrid-profiles'
+  );
+
   return {
     port: userConfig.port ?? parseIntWithDefault(process.env.PORT, 3000, 0),
     host: userConfig.host ?? (process.env.HOST || '0.0.0.0'),
@@ -21,6 +28,7 @@ export function resolveGridConfig(userConfig: Partial<GridConfig> = {}): Resolve
     headless: userConfig.headless ?? process.env.HEADLESS !== 'false',
     stealth: userConfig.stealth ?? process.env.STEALTH !== 'false',
     userDataDirBase: userConfig.userDataDirBase ?? process.env.USER_DATA_DIR_BASE,
+    profilesDir: userConfig.profilesDir ?? process.env.PROFILES_DIR ?? defaultProfilesDir,
     executablePath: userConfig.executablePath ?? process.env.CHROME_PATH,
     queueTimeoutMs:
       userConfig.queueTimeoutMs ?? parseIntWithDefault(process.env.QUEUE_TIMEOUT_MS, 15000, 0),

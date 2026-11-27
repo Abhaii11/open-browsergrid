@@ -8,7 +8,10 @@ import type { ChildProcess } from 'node:child_process';
 import {
   buildLaunchArgs,
   cleanupUserDataDir,
+  deletePersistentProfile,
   findBrowserExecutable,
+  listPersistentProfiles,
+  resolveSessionUserDataDir,
   terminateProcess,
   validateSessionId,
 } from '../../src/browserLauncher.js';
@@ -25,6 +28,56 @@ test('validateSessionId accepts safe names and rejects traversal or invalid char
   assert.throws(() => validateSessionId('x'.repeat(65)), InvalidSessionIdError);
 });
 
+test('resolveSessionUserDataDir distinguishes ephemeral and persistent profile paths', () => {
+  const ephemeral = resolveSessionUserDataDir('sess-1', {
+    userDataDirBase: '/tmp/ephemeral',
+    profilesDir: '/tmp/profiles',
+  });
+  assert.strictEqual(ephemeral.persistent, false);
+  assert.strictEqual(
+    ephemeral.userDataDir,
+    path.join('/tmp/ephemeral', 'browsergrid-session-sess-1')
+  );
+
+  const persistent = resolveSessionUserDataDir(
+    'sess-2',
+    {
+      userDataDirBase: '/tmp/ephemeral',
+      profilesDir: '/tmp/profiles',
+    },
+    'account_a'
+  );
+  assert.strictEqual(persistent.persistent, true);
+  assert.strictEqual(persistent.userDataDir, path.join('/tmp/profiles', 'profile-account_a'));
+
+  assert.throws(
+    () => resolveSessionUserDataDir('sess-3', { profilesDir: '/tmp/profiles' }, '../../outside'),
+    InvalidSessionIdError
+  );
+});
+
+test('listPersistentProfiles and deletePersistentProfile manage profile directories', async () => {
+  const profilesDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bg-profiles-unit-'));
+  try {
+    await fs.promises.mkdir(path.join(profilesDir, 'profile-alpha'));
+    await fs.promises.mkdir(path.join(profilesDir, 'profile-beta'));
+    await fs.promises.mkdir(path.join(profilesDir, 'ignored-folder'));
+
+    const list = await listPersistentProfiles(profilesDir, new Set(['alpha']));
+    assert.strictEqual(list.length, 2);
+    assert.strictEqual(list[0].id, 'alpha');
+    assert.strictEqual(list[0].inUse, true);
+    assert.strictEqual(list[1].id, 'beta');
+    assert.strictEqual(list[1].inUse, false);
+
+    assert.strictEqual(await deletePersistentProfile(profilesDir, 'beta'), true);
+    assert.strictEqual(await deletePersistentProfile(profilesDir, 'missing'), false);
+    assert.strictEqual(fs.existsSync(path.join(profilesDir, 'profile-beta')), false);
+  } finally {
+    await fs.promises.rm(profilesDir, { recursive: true, force: true });
+  }
+});
+
 test('buildLaunchArgs applies headless and stealth flags conditionally', () => {
   const fullStealth = buildLaunchArgs('/tmp/profile-1', { headless: true, stealth: true });
   assert.ok(fullStealth.includes('--user-data-dir=/tmp/profile-1'));
@@ -35,6 +88,7 @@ test('buildLaunchArgs applies headless and stealth flags conditionally', () => {
   const headfulNoStealth = buildLaunchArgs('/tmp/profile-2', { headless: false, stealth: false });
   assert.ok(!headfulNoStealth.includes('--headless=new'));
   assert.ok(!headfulNoStealth.includes('--disable-blink-features=AutomationControlled'));
+  assert.ok(headfulNoStealth.includes('--disable-gpu'));
 });
 
 test('findBrowserExecutable throws clear error when custom executablePath is missing', () => {

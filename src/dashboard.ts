@@ -413,6 +413,10 @@ await browser.close();\`
         const metaTags = s.metadata ? Object.entries(s.metadata)
           .map(([k, v]) => \`<span class="status-pill" style="background: rgba(148,163,184,0.12); color: var(--text-muted); font-size: 0.7rem;">\${escapeHtml(k)}=\${escapeHtml(v)}</span>\`)
           .join(' ') : '';
+        const profileBadge = s.profileId
+          ? \`<span class="status-pill" style="background: rgba(168,85,247,0.15); color: #c084fc; font-size: 0.7rem;">profile:\${escapeHtml(s.profileId)}</span>\`
+          : '';
+        const stealthInfo = s.stealth ? \` | \${escapeHtml(s.stealth.preset)} (\${escapeHtml(s.stealth.timezone)})\` : '';
         const memInfo = typeof s.memoryMb === 'number' ? \` | RAM: \${s.memoryMb}MB\` : '';
         return \`
         <div class="session-card \${s.id === activeSessionId ? 'active' : ''}" onclick="selectSession('\${escapeHtml(s.id)}')">
@@ -422,8 +426,8 @@ await browser.close();\`
           </div>
           <div class="session-meta">
             <span>\${escapeHtml(s.title || 'Untitled Page')}</span>
-            <span>Uptime: \${s.uptimeSeconds}s | Msgs: \${s.metrics.messagesProxied}\${memInfo}</span>
-            \${metaTags ? \`<div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin-top:0.25rem;">\${metaTags}</div>\` : ''}
+            <span>Uptime: \${s.uptimeSeconds}s | Msgs: \${s.metrics.messagesProxied}\${memInfo}\${stealthInfo}</span>
+            \${profileBadge || metaTags ? \`<div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin-top:0.25rem;">\${profileBadge}\${metaTags}</div>\` : ''}
           </div>
         </div>
       \`;

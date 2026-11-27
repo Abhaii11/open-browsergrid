@@ -3,6 +3,42 @@ import type { WebSocket } from 'ws';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
 export type LogFormat = 'json' | 'pretty';
+export type StealthPreset = 'auto' | 'macos' | 'windows' | 'linux';
+
+export interface StealthOptions {
+  preset?: StealthPreset;
+  userAgent?: string;
+  locale?: string;
+  timezone?: string;
+  seed?: number;
+}
+
+export interface UserAgentMetadata {
+  brands: Array<{ brand: string; version: string }>;
+  fullVersionList: Array<{ brand: string; version: string }>;
+  platform: string;
+  platformVersion: string;
+  architecture: string;
+  model: string;
+  mobile: boolean;
+  bitness: string;
+}
+
+export interface StealthProfile {
+  seed: number;
+  preset: Exclude<StealthPreset, 'auto'>;
+  userAgent: string;
+  platform: string;
+  acceptLanguage: string;
+  languages: string[];
+  locale: string;
+  timezone: string;
+  hardwareConcurrency: number;
+  deviceMemory: number;
+  webglVendor: string;
+  webglRenderer: string;
+  userAgentMetadata: UserAgentMetadata;
+}
 
 export interface GridConfig {
   port: number;
@@ -13,6 +49,7 @@ export interface GridConfig {
   headless: boolean;
   stealth: boolean;
   userDataDirBase?: string;
+  profilesDir?: string;
   executablePath?: string;
   queueTimeoutMs?: number;
   maxQueueSize?: number;
@@ -24,6 +61,7 @@ export interface GridConfig {
 }
 
 export interface ResolvedGridConfig extends GridConfig {
+  profilesDir: string;
   queueTimeoutMs: number;
   maxQueueSize: number;
   maxSessionMemoryMb: number;
@@ -35,12 +73,17 @@ export interface ResolvedGridConfig extends GridConfig {
 
 export interface CreateSessionOptions {
   id?: string;
+  profileId?: string;
   metadata?: Record<string, string>;
   timeoutMs?: number;
+  stealthOptions?: StealthOptions;
 }
 
 export interface BrowserSession {
   id: string;
+  profileId?: string;
+  persistent: boolean;
+  stealthProfile?: StealthProfile;
   createdAt: number;
   lastActiveAt: number;
   timeoutMs: number;
@@ -65,6 +108,8 @@ export interface BrowserSession {
 
 export interface SessionSummary {
   id: string;
+  profileId?: string;
+  persistent: boolean;
   createdAt: number;
   uptimeSeconds: number;
   timeoutMs: number;
@@ -74,10 +119,23 @@ export interface SessionSummary {
   memoryMb?: number;
   hasClient: boolean;
   metadata: Record<string, string>;
+  stealth?: {
+    preset: string;
+    locale: string;
+    timezone: string;
+    webglRenderer: string;
+  };
   metrics: {
     messagesProxied: number;
     framesReceived: number;
   };
+}
+
+export interface ProfileSummary {
+  id: string;
+  path: string;
+  inUse: boolean;
+  updatedAt: number;
 }
 
 export interface GridStats {
@@ -89,8 +147,15 @@ export interface GridStats {
 
 export class InvalidSessionIdError extends Error {
   constructor(id: string) {
-    super(`Invalid session ID "${id}": must be 1-64 characters matching [a-zA-Z0-9_-]`);
+    super(`Invalid identifier "${id}": must be 1-64 characters matching [a-zA-Z0-9_-]`);
     this.name = 'InvalidSessionIdError';
+  }
+}
+
+export class ProfileInUseError extends Error {
+  constructor(profileId: string) {
+    super(`Persistent profile "${profileId}" is currently attached to an active session`);
+    this.name = 'ProfileInUseError';
   }
 }
 

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Advanced stealth profile engine (`resolveStealthProfile`, `buildStealthScript`) with per-session WebGL vendor/renderer spoofing, seeded Canvas LSB & AudioContext fingerprint jitter, Client Hints/User-Agent CDP override, and timezone/locale consistency
+- Persistent browser profiles (`profileId`, `PROFILES_DIR`, `--profiles-dir`) with conflict protection (`409 Conflict`) and `/api/profiles` management endpoints
 - Structured logger (`src/logger.ts`) with JSON/pretty formatting and `LOG_LEVEL` support
 - Shared configuration resolver (`src/config.ts`) and expanded CLI flags (`--queue-timeout`, `--max-queue`, `--max-memory-mb`, `--log-level`, `--log-format`)
 - Concurrent slot reservation, FIFO session queuing (`QUEUE_TIMEOUT_MS`, `MAX_QUEUE_SIZE`), and named session re-attachment

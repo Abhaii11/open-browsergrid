@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import {
   cleanupUserDataDir,
+  deletePersistentProfile,
   getProcessMemoryMb,
   launchBrowserSession,
+  listPersistentProfiles,
   terminateProcess,
   validateSessionId,
   type SessionLauncher,
@@ -11,13 +13,16 @@ import {
 import { createClientMessageBuffer, setupCdpProxy } from './cdpProxy.js';
 import { resolveGridConfig } from './config.js';
 import { createLogger, type Logger } from './logger.js';
+import { resolveStealthProfile } from './stealth.js';
 import {
+  ProfileInUseError,
   QueueFullError,
   QueueTimeoutError,
   type BrowserSession,
   type CreateSessionOptions,
   type GridConfig,
   type GridStats,
+  type ProfileSummary,
   type ResolvedGridConfig,
   type SessionSummary,
 } from './types.js';
@@ -42,6 +47,7 @@ export class SessionManager {
 
   private sessions = new Map<string, BrowserSession>();
   private inFlightById = new Map<string, Promise<BrowserSession>>();
+  private activeProfileIds = new Set<string>();
   private pendingLaunches = 0;
   private waitQueue: QueueWaiter[] = [];
   private dashboardSubscribers = new Set<WebSocket>();
@@ -59,7 +65,8 @@ export class SessionManager {
       });
     this.launcher =
       deps.launcher ??
-      ((id, cfg) => launchBrowserSession(id, cfg, this.logger.child({ sessionId: id })));
+      ((id, cfg, profileId) =>
+        launchBrowserSession(id, cfg, this.logger.child({ sessionId: id }), profileId));
     this.getMemoryMb = deps.getMemoryMb ?? getProcessMemoryMb;
 
     this.watchdogTimer = setInterval(() => {
@@ -86,8 +93,13 @@ export class SessionManager {
       typeof optionsOrId === 'string' ? { id: optionsOrId } : (optionsOrId ?? {});
 
     const id = options.id ? validateSessionId(options.id) : randomUUID().slice(0, 8);
+    const profileId = options.profileId ? validateSessionId(options.profileId) : undefined;
+
     const existing = this.sessions.get(id);
     if (existing && existing.status !== 'closing' && existing.status !== 'closed') {
+      if (profileId && existing.profileId !== profileId) {
+        throw new ProfileInUseError(profileId);
+      }
       return existing;
     }
 
@@ -96,11 +108,23 @@ export class SessionManager {
       return inFlight;
     }
 
-    const createPromise = this.launchWithSlotReservation(id, options);
+    if (profileId) {
+      if (this.activeProfileIds.has(profileId)) {
+        throw new ProfileInUseError(profileId);
+      }
+      this.activeProfileIds.add(profileId);
+    }
+
+    const createPromise = this.launchWithSlotReservation(id, options, profileId);
     this.inFlightById.set(id, createPromise);
 
     try {
       return await createPromise;
+    } catch (err) {
+      if (profileId) {
+        this.activeProfileIds.delete(profileId);
+      }
+      throw err;
     } finally {
       this.inFlightById.delete(id);
     }
@@ -108,20 +132,29 @@ export class SessionManager {
 
   private async launchWithSlotReservation(
     id: string,
-    options: CreateSessionOptions
+    options: CreateSessionOptions,
+    profileId?: string
   ): Promise<BrowserSession> {
     await this.acquireSlot();
 
     let transferredToSession = false;
     try {
-      const launchResult = await this.launcher(id, this.config);
+      const launchResult = await this.launcher(id, this.config, profileId);
+      const persistent = launchResult.persistent ?? Boolean(profileId);
       const timeoutMs =
         options.timeoutMs && options.timeoutMs >= 1000
           ? options.timeoutMs
           : this.config.sessionTimeoutMs;
 
+      const stealthProfile = this.config.stealth
+        ? resolveStealthProfile(profileId || id, options.stealthOptions)
+        : undefined;
+
       const session: BrowserSession = {
         id,
+        profileId,
+        persistent,
+        stealthProfile,
         createdAt: Date.now(),
         lastActiveAt: Date.now(),
         timeoutMs,
@@ -146,6 +179,9 @@ export class SessionManager {
 
       this.logger.info('Browser session created', {
         sessionId: id,
+        profileId,
+        persistent,
+        stealthPreset: stealthProfile?.preset,
         cdpPort: session.cdpPort,
         timeoutMs: session.timeoutMs,
         metadata: session.metadata,
@@ -217,6 +253,7 @@ export class SessionManager {
 
       this.logger.error('Browser process exited unexpectedly', {
         sessionId: session.id,
+        profileId: session.profileId,
         code,
         signal,
       });
@@ -229,7 +266,12 @@ export class SessionManager {
       }
 
       this.sessions.delete(session.id);
-      void cleanupUserDataDir(session.userDataDir, this.logger);
+      if (session.profileId) {
+        this.activeProfileIds.delete(session.profileId);
+      }
+      if (!session.persistent) {
+        void cleanupUserDataDir(session.userDataDir, this.logger);
+      }
       this.drainQueue();
       this.broadcastSessionUpdate();
     });
@@ -244,7 +286,6 @@ export class SessionManager {
         ? { id: sessionIdOrOptions || undefined }
         : sessionIdOrOptions;
 
-    // Buffer early client CDP frames right away before async launch / proxy handshake
     const buffer = createClientMessageBuffer(clientWs);
 
     try {
@@ -300,6 +341,8 @@ export class SessionManager {
   private summarizeSession(s: BrowserSession, now: number): SessionSummary {
     return {
       id: s.id,
+      profileId: s.profileId,
+      persistent: s.persistent,
       createdAt: s.createdAt,
       uptimeSeconds: Math.floor((now - s.createdAt) / 1000),
       timeoutMs: s.timeoutMs,
@@ -309,8 +352,28 @@ export class SessionManager {
       memoryMb: s.memoryMb,
       hasClient: !!s.clientWs,
       metadata: s.metadata,
+      stealth: s.stealthProfile
+        ? {
+            preset: s.stealthProfile.preset,
+            locale: s.stealthProfile.locale,
+            timezone: s.stealthProfile.timezone,
+            webglRenderer: s.stealthProfile.webglRenderer,
+          }
+        : undefined,
       metrics: s.metrics,
     };
+  }
+
+  public async listProfiles(): Promise<ProfileSummary[]> {
+    return listPersistentProfiles(this.config.profilesDir, this.activeProfileIds);
+  }
+
+  public async deleteProfile(profileId: string): Promise<boolean> {
+    const safeId = validateSessionId(profileId);
+    if (this.activeProfileIds.has(safeId)) {
+      throw new ProfileInUseError(safeId);
+    }
+    return deletePersistentProfile(this.config.profilesDir, safeId);
   }
 
   public async closeSession(id: string): Promise<boolean> {
@@ -331,10 +394,15 @@ export class SessionManager {
     await terminateProcess(session.process);
     session.status = 'closed';
     this.sessions.delete(id);
+    if (session.profileId) {
+      this.activeProfileIds.delete(session.profileId);
+    }
 
-    await cleanupUserDataDir(session.userDataDir, this.logger);
+    if (!session.persistent) {
+      await cleanupUserDataDir(session.userDataDir, this.logger);
+    }
 
-    this.logger.info('Browser session closed', { sessionId: id });
+    this.logger.info('Browser session closed', { sessionId: id, persistent: session.persistent });
     this.drainQueue();
     this.broadcastSessionUpdate();
     return true;

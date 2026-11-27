@@ -29,6 +29,8 @@ for (let i = 0; i < args.length; i++) {
     config.maxQueueSize = requireInt(arg, args[++i], 0);
   } else if (arg === '--max-memory-mb') {
     config.maxSessionMemoryMb = requireInt(arg, args[++i], 0);
+  } else if (arg === '--profiles-dir') {
+    config.profilesDir = args[++i];
   } else if (arg === '--log-level') {
     config.logLevel = args[++i] as LogLevel;
   } else if (arg === '--log-format') {
@@ -53,6 +55,7 @@ Options:
   --queue-timeout <ms>        Max time to wait when pool is full (default: 15000)
   --max-queue <number>        Max queued requests when pool is full (default: 25)
   --max-memory-mb <mb>        Auto-terminate sessions above RSS limit (default: 0, disabled)
+  --profiles-dir <path>       Directory to store persistent browser profiles
   --log-level <level>         Log level: debug | info | warn | error | silent
   --log-format <format>       Log format: pretty | json
   --api-key <string>          Require API key / bearer token for connections

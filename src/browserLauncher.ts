@@ -4,15 +4,84 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Logger } from './logger.js';
 import { STEALTH_LAUNCH_FLAGS } from './stealth.js';
-import { InvalidSessionIdError, type GridConfig } from './types.js';
+import {
+  InvalidSessionIdError,
+  type GridConfig,
+  type ProfileSummary,
+  type ResolvedGridConfig,
+} from './types.js';
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+const PROFILE_PREFIX = 'profile-';
 
 export function validateSessionId(sessionId: string): string {
   if (!SESSION_ID_PATTERN.test(sessionId)) {
     throw new InvalidSessionIdError(sessionId);
   }
   return sessionId;
+}
+
+export function resolveSessionUserDataDir(
+  sessionId: string,
+  config: Pick<ResolvedGridConfig, 'userDataDirBase' | 'profilesDir'>,
+  profileId?: string
+): { userDataDir: string; persistent: boolean } {
+  if (profileId) {
+    const safeProfileId = validateSessionId(profileId);
+    return {
+      userDataDir: path.join(config.profilesDir, `${PROFILE_PREFIX}${safeProfileId}`),
+      persistent: true,
+    };
+  }
+  const baseDir = config.userDataDirBase || os.tmpdir();
+  return {
+    userDataDir: path.join(baseDir, `browsergrid-session-${sessionId}`),
+    persistent: false,
+  };
+}
+
+export async function listPersistentProfiles(
+  profilesDir: string,
+  activeProfileIds: ReadonlySet<string> = new Set()
+): Promise<ProfileSummary[]> {
+  if (!fs.existsSync(profilesDir)) {
+    return [];
+  }
+  const entries = await fs.promises.readdir(profilesDir, { withFileTypes: true });
+  const summaries: ProfileSummary[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(PROFILE_PREFIX)) {
+      continue;
+    }
+    const id = entry.name.slice(PROFILE_PREFIX.length);
+    if (!SESSION_ID_PATTERN.test(id)) {
+      continue;
+    }
+    const fullPath = path.join(profilesDir, entry.name);
+    const stat = await fs.promises.stat(fullPath);
+    summaries.push({
+      id,
+      path: fullPath,
+      inUse: activeProfileIds.has(id),
+      updatedAt: stat.mtimeMs,
+    });
+  }
+
+  return summaries.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export async function deletePersistentProfile(
+  profilesDir: string,
+  profileId: string
+): Promise<boolean> {
+  const safeId = validateSessionId(profileId);
+  const fullPath = path.join(profilesDir, `${PROFILE_PREFIX}${safeId}`);
+  if (!fs.existsSync(fullPath)) {
+    return false;
+  }
+  await fs.promises.rm(fullPath, { recursive: true, force: true });
+  return true;
 }
 
 export function findBrowserExecutable(customPath?: string): string {
@@ -101,7 +170,6 @@ export function buildLaunchArgs(
     '--remote-debugging-port=0',
     '--remote-debugging-address=127.0.0.1',
     '--no-sandbox',
-    '--disable-gpu',
     '--disable-background-networking',
     '--disable-background-timer-throttling',
     '--disable-breakpad',
@@ -126,6 +194,8 @@ export function buildLaunchArgs(
 
   if (config.stealth) {
     args.push(...STEALTH_LAUNCH_FLAGS);
+  } else {
+    args.push('--disable-gpu');
   }
 
   args.push('about:blank');
@@ -220,19 +290,24 @@ export interface LaunchResult {
   wsEndpoint: string;
   cdpPort: number;
   userDataDir: string;
+  persistent?: boolean;
 }
 
-export type SessionLauncher = (sessionId: string, config: GridConfig) => Promise<LaunchResult>;
+export type SessionLauncher = (
+  sessionId: string,
+  config: ResolvedGridConfig,
+  profileId?: string
+) => Promise<LaunchResult>;
 
 export async function launchBrowserSession(
   sessionId: string,
-  config: GridConfig,
-  logger?: Logger
+  config: ResolvedGridConfig,
+  logger?: Logger,
+  profileId?: string
 ): Promise<LaunchResult> {
   validateSessionId(sessionId);
   const executable = findBrowserExecutable(config.executablePath);
-  const baseDir = config.userDataDirBase || os.tmpdir();
-  const userDataDir = path.join(baseDir, `browsergrid-session-${sessionId}`);
+  const { userDataDir, persistent } = resolveSessionUserDataDir(sessionId, config, profileId);
   await fs.promises.mkdir(userDataDir, { recursive: true });
 
   const args = buildLaunchArgs(userDataDir, config);
@@ -255,7 +330,9 @@ export async function launchBrowserSession(
       } catch {
         // ignore
       }
-      void cleanupUserDataDir(userDataDir, logger);
+      if (!persistent) {
+        void cleanupUserDataDir(userDataDir, logger);
+      }
       reject(err);
     };
 
@@ -282,6 +359,7 @@ export async function launchBrowserSession(
           wsEndpoint: match[1],
           cdpPort: Number.parseInt(match[2], 10),
           userDataDir,
+          persistent,
         });
       }
     };

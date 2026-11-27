@@ -18,6 +18,16 @@ interface CdpCommand {
   params?: Record<string, unknown>;
 }
 
+async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 test('End-to-end WebSocket CDP Proxy buffers early messages, injects stealth, streams frames, and supports re-attach', async () => {
   // Start a lightweight mock Chromium DevTools WebSocket server
   const receivedCommands: CdpCommand[] = [];
@@ -133,8 +143,10 @@ test('End-to-end WebSocket CDP Proxy buffers early messages, injects stealth, st
       dashboardEvents.push(JSON.parse(data.toString('utf-8')));
     });
 
-    // Connect Client #1 to named session with query metadata
-    client1 = new WebSocket(`ws://127.0.0.1:${gridPort}/connect/reusable-agent?tag_owner=ci`);
+    // Connect Client #1 to named session with query metadata and stealth preset params
+    client1 = new WebSocket(
+      `ws://127.0.0.1:${gridPort}/connect/reusable-agent?tag_owner=ci&preset=windows&locale=en-GB&timezone=Europe/London`
+    );
     await waitForOpen(client1);
 
     const client1Messages: Array<{ id?: number; result?: Record<string, unknown> }> = [];
@@ -146,29 +158,29 @@ test('End-to-end WebSocket CDP Proxy buffers early messages, injects stealth, st
     client1.send(JSON.stringify({ id: 1, method: 'Browser.getVersion' }));
 
     // Wait for early message response, stealth injection, screencast ack, and dashboard frame
-    await new Promise<void>((resolve, reject) => {
-      const deadline = setTimeout(
-        () => reject(new Error('Timed out waiting for CDP proxy messages')),
-        3000
+    await waitUntil(() => {
+      const gotVersion = client1Messages.some((m) => m.id === 1);
+      const gotAck = receivedCommands.some((c) => c.method === 'Page.screencastFrameAck');
+      const gotFrame = dashboardEvents.some(
+        (e) => e.type === 'frame' && e.frame === 'ZmFrZS1qcGVnLWZyYW1l'
       );
-      const check = setInterval(() => {
-        const gotVersion = client1Messages.some((m) => m.id === 1);
-        const gotAck = receivedCommands.some((c) => c.method === 'Page.screencastFrameAck');
-        const gotFrame = dashboardEvents.some(
-          (e) => e.type === 'frame' && e.frame === 'ZmFrZS1qcGVnLWZyYW1l'
-        );
-        if (gotVersion && gotAck && gotFrame) {
-          clearInterval(check);
-          clearTimeout(deadline);
-          resolve();
-        }
-      }, 10);
-    });
+      return gotVersion && gotAck && gotFrame;
+    }, 3000);
 
     const stealthCmd = receivedCommands.find(
       (c) => c.method === 'Page.addScriptToEvaluateOnNewDocument'
     );
+    const uaCmd = receivedCommands.find((c) => c.method === 'Emulation.setUserAgentOverride');
+    const tzCmd = receivedCommands.find((c) => c.method === 'Emulation.setTimezoneOverride');
+    const localeCmd = receivedCommands.find((c) => c.method === 'Emulation.setLocaleOverride');
+
     assert.ok(stealthCmd, 'stealth script should be injected on attached page target');
+    assert.ok(
+      uaCmd?.params?.platform === 'Win32',
+      'should override UA platform for windows preset'
+    );
+    assert.strictEqual(tzCmd?.params?.timezoneId, 'Europe/London');
+    assert.strictEqual(localeCmd?.params?.locale, 'en-GB');
     assert.strictEqual(app.sessionManager.getSession('reusable-agent')?.metadata.owner, 'ci');
     assert.strictEqual(
       client1Messages.some((m) => typeof m.id === 'number' && m.id >= 900_000_000),
@@ -181,10 +193,9 @@ test('End-to-end WebSocket CDP Proxy buffers early messages, injects stealth, st
       'unsolicited Page.screencastFrame events must not be forwarded to client'
     );
 
-    // Disconnect Client #1 and verify named session remains ready and re-attachable
+    // Disconnect Client #1 and verify named session transitions back to ready cleanly
     client1.close();
-    await new Promise((r) => setTimeout(r, 30));
-    assert.strictEqual(app.sessionManager.getSession('reusable-agent')?.status, 'ready');
+    await waitUntil(() => app.sessionManager.getSession('reusable-agent')?.status === 'ready');
 
     client2 = new WebSocket(`ws://127.0.0.1:${gridPort}/connect/reusable-agent`);
     await waitForOpen(client2);

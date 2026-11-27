@@ -182,6 +182,7 @@ await browser.close();
 | `HEADLESS` | `true` | Run Chromium in headless mode |
 | `API_KEY` | *(None)* | Optional Bearer token / API key to require for connections |
 | `CHROME_PATH` | *(Auto)* | Custom path to Chromium / Google Chrome binary |
+| `PROFILES_DIR` | *(Temp dir)* | Persistent browser profiles directory (`profileId`) |
 
 ---
 
@@ -189,7 +190,8 @@ await browser.close();
 
 - [x] Ephemeral isolated Chromium browser pool
 - [x] Bidirectional CDP WebSocket Proxy
-- [x] Anti-detection stealth evasion injection
+- [x] Anti-detection stealth evasion injection (WebGL, Canvas, AudioContext, Client Hints, timezone/locale)
+- [x] Persistent browser profiles (`profileId`) & profile management API
 - [x] Live web dashboard with real-time screencast canvas
 - [x] Docker & Docker Compose setup
 - [ ] Session video recording to WebM / MP4

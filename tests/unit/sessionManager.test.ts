@@ -5,10 +5,26 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import type { LaunchResult } from '../../src/browserLauncher.js';
+import { resolveSessionUserDataDir, type LaunchResult } from '../../src/browserLauncher.js';
 import { createLogger } from '../../src/logger.js';
 import { SessionManager } from '../../src/sessionManager.js';
-import { QueueFullError, QueueTimeoutError, type GridConfig } from '../../src/types.js';
+import {
+  ProfileInUseError,
+  QueueFullError,
+  QueueTimeoutError,
+  type GridConfig,
+  type ResolvedGridConfig,
+} from '../../src/types.js';
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
 
 function createStubChild(): ChildProcess & EventEmitter {
   const child = new EventEmitter() as ChildProcess & EventEmitter;
@@ -50,19 +66,25 @@ function createStubLauncher(delayMs = 0) {
   let launches = 0;
   const children = new Map<string, ChildProcess & EventEmitter>();
 
-  const launcher = async (sessionId: string): Promise<LaunchResult> => {
+  const launcher = async (
+    sessionId: string,
+    cfg: ResolvedGridConfig,
+    profileId?: string
+  ): Promise<LaunchResult> => {
     launches++;
     if (delayMs > 0) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
-    const userDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `bg-test-${sessionId}-`));
+    const resolved = resolveSessionUserDataDir(sessionId, cfg, profileId);
+    await fs.promises.mkdir(resolved.userDataDir, { recursive: true });
     const child = createStubChild();
     children.set(sessionId, child);
     return {
       process: child,
       wsEndpoint: `ws://127.0.0.1:9999/devtools/browser/${sessionId}`,
       cdpPort: 9999,
-      userDataDir,
+      userDataDir: resolved.userDataDir,
+      persistent: resolved.persistent,
     };
   };
 
@@ -96,9 +118,8 @@ test('SessionManager deduplicates concurrent named sessions and queues excess re
     return s;
   });
 
-  await new Promise((r) => setTimeout(r, 15));
+  await waitUntil(() => manager.getStats().queuedRequests === 1);
   assert.strictEqual(secondResolved, false);
-  assert.strictEqual(manager.getStats().queuedRequests, 1);
 
   await manager.closeSession('shared-agent');
   const second = await secondPromise;
@@ -121,8 +142,10 @@ test('SessionManager rejects QueueFullError and QueueTimeoutError cleanly', asyn
   await manager.createSession({ id: 'slot-1' });
 
   const waiting = manager.createSession({ id: 'slot-2' });
+  const waitingRejection = assert.rejects(waiting, QueueTimeoutError);
+
   await assert.rejects(manager.createSession({ id: 'slot-3' }), QueueFullError);
-  await assert.rejects(waiting, QueueTimeoutError);
+  await waitingRejection;
 
   await manager.shutdown();
 });
@@ -140,11 +163,9 @@ test('SessionManager recovers automatically from unexpected Chromium crash', asy
 
   // Trigger unexpected exit (code 137 = SIGKILL crash)
   stub.getChild('crash-prone')?.emit('exit', 137, null);
-  await new Promise((r) => setTimeout(r, 30));
+  await waitUntil(() => !manager.getSession('crash-prone') && !fs.existsSync(dir));
 
-  assert.strictEqual(manager.getSession('crash-prone'), undefined);
   assert.strictEqual(manager.getStats().activeSessions, 0);
-  assert.strictEqual(fs.existsSync(dir), false);
 
   // Pool slot is freed for new sessions
   const replacement = await manager.createSession({ id: 'recovered' });
@@ -185,4 +206,59 @@ test('SessionManager watchdog reaps idle and oversized-memory sessions', async (
   assert.strictEqual(manager.getSession('healthy-one')?.memoryMb, 180);
 
   await manager.shutdown();
+});
+
+test('SessionManager preserves persistent profiles on close and prevents concurrent profile attachment', async () => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bg-sm-profiles-'));
+  const profilesDir = path.join(tempRoot, 'profiles');
+  const stub = createStubLauncher(0);
+
+  const manager = new SessionManager(
+    makeConfig({ maxSessions: 3, profilesDir, userDataDirBase: tempRoot }),
+    {
+      launcher: stub.launcher,
+      logger: createLogger({ level: 'silent' }),
+    }
+  );
+
+  try {
+    const s1 = await manager.createSession({
+      id: 'first-run',
+      profileId: 'social-bot',
+      stealthOptions: { preset: 'windows', timezone: 'America/New_York' },
+    });
+    assert.strictEqual(s1.persistent, true);
+    assert.strictEqual(s1.profileId, 'social-bot');
+    assert.strictEqual(s1.stealthProfile?.preset, 'windows');
+    await fs.promises.writeFile(path.join(s1.userDataDir, 'Cookies'), 'auth=1');
+
+    // Concurrent session claiming same profileId must be rejected
+    await assert.rejects(
+      manager.createSession({ id: 'second-run', profileId: 'social-bot' }),
+      ProfileInUseError
+    );
+
+    // Deleting an active profile is rejected
+    await assert.rejects(manager.deleteProfile('social-bot'), ProfileInUseError);
+
+    // Close first session; persistent directory and Cookies must survive
+    await manager.closeSession('first-run');
+    assert.strictEqual(fs.existsSync(path.join(s1.userDataDir, 'Cookies')), true);
+
+    // Another session can now reuse the persistent profile cleanly
+    const s2 = await manager.createSession({ id: 'reused-run', profileId: 'social-bot' });
+    assert.strictEqual(s2.userDataDir, s1.userDataDir);
+
+    const profiles = await manager.listProfiles();
+    assert.strictEqual(profiles.length, 1);
+    assert.strictEqual(profiles[0].id, 'social-bot');
+    assert.strictEqual(profiles[0].inUse, true);
+
+    await manager.closeSession('reused-run');
+    assert.strictEqual(await manager.deleteProfile('social-bot'), true);
+    assert.strictEqual((await manager.listProfiles()).length, 0);
+  } finally {
+    await manager.shutdown();
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  }
 });

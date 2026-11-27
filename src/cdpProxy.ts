@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import type { Logger } from './logger.js';
-import { STEALTH_INJECTION_SCRIPT } from './stealth.js';
+import { buildStealthScript, STEALTH_INJECTION_SCRIPT } from './stealth.js';
 import type { BrowserSession, ResolvedGridConfig } from './types.js';
 
 export interface BufferedWsMessage {
@@ -78,7 +78,7 @@ export function setupCdpProxy(
     let screencastStarted = false;
     let clientRequestedScreencast = false;
     let internalMessageId = 900_000_000;
-    const internalRequestIds = new Set<number>();
+    const internalRequestIds = new Map<number, string>();
     let settled = false;
     let browserReady = false;
     let tornDown = false;
@@ -98,7 +98,7 @@ export function setupCdpProxy(
       cdpSessionId?: string
     ) => {
       const id = ++internalMessageId;
-      internalRequestIds.add(id);
+      internalRequestIds.set(id, method);
       const command: Record<string, unknown> = { id, method, params };
       if (cdpSessionId) {
         command.sessionId = cdpSessionId;
@@ -244,7 +244,14 @@ export function setupCdpProxy(
 
           // Never leak responses for proxy-internal CDP requests back to the client
           if (typeof msg.id === 'number' && internalRequestIds.has(msg.id)) {
+            const internalMethod = internalRequestIds.get(msg.id);
             internalRequestIds.delete(msg.id);
+            if (msg.error) {
+              log?.debug('Internal CDP command returned error', {
+                method: internalMethod,
+                error: msg.error,
+              });
+            }
             return;
           }
 
@@ -277,11 +284,36 @@ export function setupCdpProxy(
             const targetSessionId = msg.params.sessionId as string;
 
             if (config.stealth) {
+              const profile = session.stealthProfile;
+              const script = profile ? buildStealthScript(profile) : STEALTH_INJECTION_SCRIPT;
               sendInternalCommand(
                 'Page.addScriptToEvaluateOnNewDocument',
-                { source: STEALTH_INJECTION_SCRIPT },
+                { source: script },
                 targetSessionId
               );
+
+              if (profile) {
+                sendInternalCommand(
+                  'Emulation.setUserAgentOverride',
+                  {
+                    userAgent: profile.userAgent,
+                    acceptLanguage: profile.acceptLanguage,
+                    platform: profile.platform,
+                    userAgentMetadata: profile.userAgentMetadata,
+                  },
+                  targetSessionId
+                );
+                sendInternalCommand(
+                  'Emulation.setTimezoneOverride',
+                  { timezoneId: profile.timezone },
+                  targetSessionId
+                );
+                sendInternalCommand(
+                  'Emulation.setLocaleOverride',
+                  { locale: profile.locale },
+                  targetSessionId
+                );
+              }
             }
 
             if (!screencastStarted) {

@@ -6,16 +6,19 @@ import type { AddressInfo } from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import type { LaunchResult } from '../../src/browserLauncher.js';
+import { resolveSessionUserDataDir, type LaunchResult } from '../../src/browserLauncher.js';
 import { createLogger } from '../../src/logger.js';
 import { createGridServer } from '../../src/server.js';
-import type { GridConfig } from '../../src/types.js';
+import type { GridConfig, ResolvedGridConfig } from '../../src/types.js';
 
 function createStubLauncher() {
-  return async (sessionId: string): Promise<LaunchResult> => {
-    const userDataDir = await fs.promises.mkdtemp(
-      path.join(os.tmpdir(), `bg-http-test-${sessionId}-`)
-    );
+  return async (
+    sessionId: string,
+    cfg: ResolvedGridConfig,
+    profileId?: string
+  ): Promise<LaunchResult> => {
+    const resolved = resolveSessionUserDataDir(sessionId, cfg, profileId);
+    await fs.promises.mkdir(resolved.userDataDir, { recursive: true });
     const child = new EventEmitter() as ChildProcess & EventEmitter;
     let exitCode: number | null = null;
     Object.defineProperty(child, 'exitCode', { get: () => exitCode });
@@ -30,12 +33,14 @@ function createStubLauncher() {
       process: child,
       wsEndpoint: `ws://127.0.0.1:9999/devtools/browser/${sessionId}`,
       cdpPort: 9999,
-      userDataDir,
+      userDataDir: resolved.userDataDir,
+      persistent: resolved.persistent,
     };
   };
 }
 
-test('OpenBrowserGrid HTTP Server Endpoints & Session Lifecycle', async (t) => {
+test('OpenBrowserGrid HTTP Server Endpoints, Stealth Options & Persistent Profiles', async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bg-http-test-'));
   const config: GridConfig = {
     port: 0,
     host: '127.0.0.1',
@@ -43,6 +48,8 @@ test('OpenBrowserGrid HTTP Server Endpoints & Session Lifecycle', async (t) => {
     maxQueueSize: 0,
     queueTimeoutMs: 100,
     sessionTimeoutMs: 60000,
+    profilesDir: path.join(tempRoot, 'profiles'),
+    userDataDirBase: tempRoot,
     headless: true,
     stealth: true,
     logLevel: 'silent',
@@ -56,56 +63,79 @@ test('OpenBrowserGrid HTTP Server Endpoints & Session Lifecycle', async (t) => {
   const port = (app.server.address() as AddressInfo).port;
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  await t.test('GET /health returns 200 and pool telemetry', async () => {
-    const res = await fetch(`${baseUrl}/health`);
-    assert.strictEqual(res.status, 200);
-    const data = (await res.json()) as Record<string, unknown>;
-    assert.strictEqual(data.status, 'ok');
-    assert.strictEqual(data.version, '0.1.0');
-    assert.strictEqual(data.maxSessions, 1);
-    assert.strictEqual(data.activeSessions, 0);
-    assert.strictEqual(data.queuedRequests, 0);
-  });
-
-  await t.test('GET / returns 200 and dashboard HTML', async () => {
-    const res = await fetch(`${baseUrl}/`);
-    assert.strictEqual(res.status, 200);
-    const text = await res.text();
-    assert.ok(text.includes('OpenBrowserGrid'));
-    assert.ok(text.includes('Active Sessions'));
-  });
-
-  await t.test('POST /api/sessions rejects invalid JSON and invalid session IDs', async () => {
-    const badJson = await fetch(`${baseUrl}/api/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{invalid-json',
+  try {
+    await t.test('GET /health returns 200 and pool telemetry', async () => {
+      const res = await fetch(`${baseUrl}/health`);
+      assert.strictEqual(res.status, 200);
+      const data = (await res.json()) as Record<string, unknown>;
+      assert.strictEqual(data.status, 'ok');
+      assert.strictEqual(data.version, '0.1.0');
+      assert.strictEqual(data.maxSessions, 1);
+      assert.strictEqual(data.activeSessions, 0);
+      assert.strictEqual(data.queuedRequests, 0);
     });
-    assert.strictEqual(badJson.status, 400);
 
-    const badId = await fetch(`${baseUrl}/api/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: '../traversal' }),
+    await t.test('GET / returns 200 and dashboard HTML', async () => {
+      const res = await fetch(`${baseUrl}/`);
+      assert.strictEqual(res.status, 200);
+      const text = await res.text();
+      assert.ok(text.includes('OpenBrowserGrid'));
+      assert.ok(text.includes('Active Sessions'));
     });
-    assert.strictEqual(badId.status, 400);
-  });
 
-  await t.test(
-    'POST, GET, and DELETE /api/sessions manage named session with metadata',
-    async () => {
+    await t.test(
+      'POST /api/sessions validates JSON, session IDs, and stealth options',
+      async () => {
+        const badJson = await fetch(`${baseUrl}/api/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{invalid-json',
+        });
+        assert.strictEqual(badJson.status, 400);
+
+        const badId = await fetch(`${baseUrl}/api/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: '../traversal' }),
+        });
+        assert.strictEqual(badId.status, 400);
+
+        const badPreset = await fetch(`${baseUrl}/api/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stealth: { preset: 'android' } }),
+        });
+        assert.strictEqual(badPreset.status, 400);
+      }
+    );
+
+    await t.test('POST, GET, DELETE /api/sessions and /api/profiles work end-to-end', async () => {
       const createRes = await fetch(`${baseUrl}/api/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: 'ci-agent-1',
+          profileId: 'acct-uk',
           timeoutMs: 120000,
+          stealth: { preset: 'windows', locale: 'en-GB', timezone: 'Europe/London' },
           metadata: { env: 'ci', workflow: 'smoke' },
         }),
       });
       assert.strictEqual(createRes.status, 201);
-      const created = (await createRes.json()) as Record<string, unknown>;
+      const created = (await createRes.json()) as {
+        id: string;
+        profileId: string;
+        persistent: boolean;
+        wsEndpoint: string;
+        metadata: Record<string, string>;
+        stealth: { preset: string; locale: string; timezone: string };
+      };
       assert.strictEqual(created.id, 'ci-agent-1');
+      assert.strictEqual(created.profileId, 'acct-uk');
+      assert.strictEqual(created.persistent, true);
+      assert.strictEqual(created.stealth.preset, 'windows');
+      assert.strictEqual(created.stealth.locale, 'en-GB');
+      assert.strictEqual(created.stealth.timezone, 'Europe/London');
       assert.strictEqual(created.wsEndpoint, `ws://127.0.0.1:${port}/connect/ci-agent-1`);
       assert.deepStrictEqual(created.metadata, { env: 'ci', workflow: 'smoke' });
 
@@ -114,6 +144,18 @@ test('OpenBrowserGrid HTTP Server Endpoints & Session Lifecycle', async (t) => {
       const summary = (await getRes.json()) as Record<string, unknown>;
       assert.strictEqual(summary.id, 'ci-agent-1');
       assert.strictEqual(summary.timeoutMs, 120000);
+
+      // Concurrent profile attachment conflict returns 409 Conflict
+      const conflictRes = await fetch(`${baseUrl}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'other-agent', profileId: 'acct-uk' }),
+      });
+      assert.strictEqual(conflictRes.status, 409);
+
+      // Deleting active profile returns 409 Conflict
+      const delActiveProfile = await fetch(`${baseUrl}/api/profiles/acct-uk`, { method: 'DELETE' });
+      assert.strictEqual(delActiveProfile.status, 409);
 
       // Queue limit = 0 so concurrent overflow returns 429
       const overflowRes = await fetch(`${baseUrl}/api/sessions`, {
@@ -126,19 +168,30 @@ test('OpenBrowserGrid HTTP Server Endpoints & Session Lifecycle', async (t) => {
       const delRes = await fetch(`${baseUrl}/api/sessions/ci-agent-1`, { method: 'DELETE' });
       assert.strictEqual(delRes.status, 200);
 
+      const profilesRes = await fetch(`${baseUrl}/api/profiles`);
+      assert.strictEqual(profilesRes.status, 200);
+      const profiles = (await profilesRes.json()) as Array<{ id: string; inUse: boolean }>;
+      assert.strictEqual(profiles.length, 1);
+      assert.strictEqual(profiles[0].id, 'acct-uk');
+      assert.strictEqual(profiles[0].inUse, false);
+
+      const delProfile = await fetch(`${baseUrl}/api/profiles/acct-uk`, { method: 'DELETE' });
+      assert.strictEqual(delProfile.status, 200);
+
       const missingRes = await fetch(`${baseUrl}/api/sessions/ci-agent-1`);
       assert.strictEqual(missingRes.status, 404);
-    }
-  );
+    });
 
-  await t.test('GET /unknown returns 404 json error', async () => {
-    const res = await fetch(`${baseUrl}/unknown`);
-    assert.strictEqual(res.status, 404);
-    const data = (await res.json()) as { error: string };
-    assert.strictEqual(data.error, 'Not found');
-  });
-
-  await app.stop();
+    await t.test('GET /unknown returns 404 json error', async () => {
+      const res = await fetch(`${baseUrl}/unknown`);
+      assert.strictEqual(res.status, 404);
+      const data = (await res.json()) as { error: string };
+      assert.strictEqual(data.error, 'Not found');
+    });
+  } finally {
+    await app.stop();
+    await fs.promises.rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('OpenBrowserGrid API Key Authentication', async (t) => {
@@ -161,17 +214,19 @@ test('OpenBrowserGrid API Key Authentication', async (t) => {
   const port = (app.server.address() as AddressInfo).port;
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  await t.test('rejects unauthenticated /api/sessions request', async () => {
-    const res = await fetch(`${baseUrl}/api/sessions`);
-    assert.strictEqual(res.status, 401);
-  });
-
-  await t.test('accepts Bearer token in Authorization header', async () => {
-    const res = await fetch(`${baseUrl}/api/sessions`, {
-      headers: { Authorization: 'Bearer secret-test-key' },
+  try {
+    await t.test('rejects unauthenticated /api/sessions request', async () => {
+      const res = await fetch(`${baseUrl}/api/sessions`);
+      assert.strictEqual(res.status, 401);
     });
-    assert.strictEqual(res.status, 200);
-  });
 
-  await app.stop();
+    await t.test('accepts Bearer token in Authorization header', async () => {
+      const res = await fetch(`${baseUrl}/api/sessions`, {
+        headers: { Authorization: 'Bearer secret-test-key' },
+      });
+      assert.strictEqual(res.status, 200);
+    });
+  } finally {
+    await app.stop();
+  }
 });

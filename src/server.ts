@@ -7,13 +7,17 @@ import { createLogger, type Logger } from './logger.js';
 import { SessionManager, type SessionManagerDeps } from './sessionManager.js';
 import {
   InvalidSessionIdError,
+  ProfileInUseError,
   QueueFullError,
   QueueTimeoutError,
   type CreateSessionOptions,
   type GridConfig,
+  type StealthOptions,
+  type StealthPreset,
 } from './types.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
+const VALID_PRESETS = new Set<StealthPreset>(['auto', 'macos', 'windows', 'linux']);
 
 function parseRequestUrl(rawUrl?: string): URL {
   try {
@@ -62,6 +66,49 @@ async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, u
   return parsed as Record<string, unknown>;
 }
 
+function parseStealthOptionsFromBody(raw: unknown): StealthOptions {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new BadRequestError('Field "stealth" must be an options object');
+  }
+  const obj = raw as Record<string, unknown>;
+  const stealth: StealthOptions = {};
+
+  if (obj.preset !== undefined) {
+    if (typeof obj.preset !== 'string' || !VALID_PRESETS.has(obj.preset as StealthPreset)) {
+      throw new BadRequestError(
+        'Field "stealth.preset" must be one of auto | macos | windows | linux'
+      );
+    }
+    stealth.preset = obj.preset as StealthPreset;
+  }
+  if (obj.userAgent !== undefined) {
+    if (typeof obj.userAgent !== 'string' || obj.userAgent.length === 0) {
+      throw new BadRequestError('Field "stealth.userAgent" must be a non-empty string');
+    }
+    stealth.userAgent = obj.userAgent;
+  }
+  if (obj.locale !== undefined) {
+    if (typeof obj.locale !== 'string' || obj.locale.length === 0) {
+      throw new BadRequestError('Field "stealth.locale" must be a non-empty string');
+    }
+    stealth.locale = obj.locale;
+  }
+  if (obj.timezone !== undefined) {
+    if (typeof obj.timezone !== 'string' || obj.timezone.length === 0) {
+      throw new BadRequestError('Field "stealth.timezone" must be a non-empty string');
+    }
+    stealth.timezone = obj.timezone;
+  }
+  if (obj.seed !== undefined) {
+    if (typeof obj.seed !== 'number' || !Number.isInteger(obj.seed) || obj.seed < 0) {
+      throw new BadRequestError('Field "stealth.seed" must be a non-negative integer');
+    }
+    stealth.seed = obj.seed;
+  }
+
+  return stealth;
+}
+
 function parseSessionOptionsFromBody(body: Record<string, unknown>): CreateSessionOptions {
   const options: CreateSessionOptions = {};
 
@@ -70,6 +117,13 @@ function parseSessionOptionsFromBody(body: Record<string, unknown>): CreateSessi
       throw new BadRequestError('Field "id" must be a string');
     }
     options.id = body.id;
+  }
+
+  if (body.profileId !== undefined) {
+    if (typeof body.profileId !== 'string') {
+      throw new BadRequestError('Field "profileId" must be a string');
+    }
+    options.profileId = body.profileId;
   }
 
   if (body.timeoutMs !== undefined) {
@@ -81,6 +135,10 @@ function parseSessionOptionsFromBody(body: Record<string, unknown>): CreateSessi
       throw new BadRequestError('Field "timeoutMs" must be a number >= 1000');
     }
     options.timeoutMs = Math.floor(body.timeoutMs);
+  }
+
+  if (body.stealth !== undefined) {
+    options.stealthOptions = parseStealthOptionsFromBody(body.stealth);
   }
 
   if (body.metadata !== undefined) {
@@ -120,6 +178,11 @@ function parseSessionOptionsFromWs(
     }
   }
 
+  const profileId = parsedUrl.searchParams.get('profileId');
+  if (profileId) {
+    options.profileId = profileId;
+  }
+
   const rawTimeout =
     parsedUrl.searchParams.get('timeoutMs') ??
     (typeof headers['x-session-timeout'] === 'string' ? headers['x-session-timeout'] : undefined);
@@ -128,6 +191,22 @@ function parseSessionOptionsFromWs(
     if (!Number.isNaN(parsed) && parsed >= 1000) {
       options.timeoutMs = parsed;
     }
+  }
+
+  const stealthOptions: StealthOptions = {};
+  const preset = parsedUrl.searchParams.get('preset');
+  if (preset && VALID_PRESETS.has(preset as StealthPreset)) {
+    stealthOptions.preset = preset as StealthPreset;
+  }
+  const locale = parsedUrl.searchParams.get('locale');
+  if (locale) stealthOptions.locale = locale;
+  const timezone = parsedUrl.searchParams.get('timezone');
+  if (timezone) stealthOptions.timezone = timezone;
+  const userAgent = parsedUrl.searchParams.get('userAgent');
+  if (userAgent) stealthOptions.userAgent = userAgent;
+
+  if (Object.keys(stealthOptions).length > 0) {
+    options.stealthOptions = stealthOptions;
   }
 
   const metadata: Record<string, string> = {};
@@ -226,16 +305,28 @@ export function createGridServer(userConfig: GridConfig, deps: GridServerDeps = 
         const session = await sessionManager.createSession(options);
         sendJson(res, 201, {
           id: session.id,
+          profileId: session.profileId,
+          persistent: session.persistent,
           wsEndpoint: `ws://${config.host}:${boundPort}/connect/${session.id}`,
           status: session.status,
           createdAt: session.createdAt,
           timeoutMs: session.timeoutMs,
           metadata: session.metadata,
+          stealth: session.stealthProfile
+            ? {
+                preset: session.stealthProfile.preset,
+                locale: session.stealthProfile.locale,
+                timezone: session.stealthProfile.timezone,
+                webglRenderer: session.stealthProfile.webglRenderer,
+              }
+            : undefined,
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         if (err instanceof BadRequestError || err instanceof InvalidSessionIdError) {
           sendJson(res, 400, { error: message });
+        } else if (err instanceof ProfileInUseError) {
+          sendJson(res, 409, { error: message });
         } else if (err instanceof QueueFullError) {
           sendJson(res, 429, { error: message });
         } else if (err instanceof QueueTimeoutError) {
@@ -274,6 +365,38 @@ export function createGridServer(userConfig: GridConfig, deps: GridServerDeps = 
         }
         return;
       }
+    }
+
+    if (pathname === '/api/profiles' && req.method === 'GET') {
+      const profiles = await sessionManager.listProfiles();
+      sendJson(res, 200, profiles);
+      return;
+    }
+
+    if (pathname.startsWith('/api/profiles/') && req.method === 'DELETE') {
+      const profileId = pathname.slice('/api/profiles/'.length).split('/')[0];
+      if (!profileId) {
+        sendJson(res, 400, { error: 'Missing profile ID' });
+        return;
+      }
+      try {
+        const deleted = await sessionManager.deleteProfile(profileId);
+        if (deleted) {
+          sendJson(res, 200, { message: `Profile ${profileId} deleted` });
+        } else {
+          sendJson(res, 404, { error: `Profile ${profileId} not found` });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (err instanceof InvalidSessionIdError) {
+          sendJson(res, 400, { error: message });
+        } else if (err instanceof ProfileInUseError) {
+          sendJson(res, 409, { error: message });
+        } else {
+          sendJson(res, 500, { error: message });
+        }
+      }
+      return;
     }
 
     sendJson(res, 404, { error: 'Not found' });
@@ -315,11 +438,14 @@ export function createGridServer(userConfig: GridConfig, deps: GridServerDeps = 
           const closeCode =
             err instanceof InvalidSessionIdError
               ? 4400
-              : err instanceof QueueFullError || err instanceof QueueTimeoutError
-                ? 1013
-                : 1011;
+              : err instanceof ProfileInUseError
+                ? 4409
+                : err instanceof QueueFullError || err instanceof QueueTimeoutError
+                  ? 1013
+                  : 1011;
           logger.warn('Failed to attach WebSocket client to session', {
             sessionId: options.id,
+            profileId: options.profileId,
             closeCode,
             err,
           });
