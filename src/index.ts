@@ -13,6 +13,8 @@ export * from './server.js';
 export * from './sessionManager.js';
 export * from './browserLauncher.js';
 export * from './cdpProxy.js';
+export * from './cdpClient.js';
+export * from './openapi.js';
 export * from './stealth.js';
 
 export function runServer(userConfig: Partial<GridConfig> = {}) {

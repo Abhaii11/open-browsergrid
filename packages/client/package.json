@@ -1,0 +1,43 @@
+{
+  "name": "@open-browsergrid/client",
+  "version": "0.1.0",
+  "description": "Typed TypeScript/JavaScript client for the OpenBrowserGrid REST API",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "browser",
+    "cdp",
+    "headless",
+    "playwright",
+    "puppeteer",
+    "ai-agents"
+  ],
+  "author": "Abhaii11",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abhaii11/open-browsergrid.git",
+    "directory": "packages/client"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
