@@ -19,6 +19,34 @@ export function getDashboardHtml(port: number): string {
       --amber: #f59e0b;
       --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
+    [data-theme="light"] {
+      --bg: #f1f5f9;
+      --card-bg: #ffffff;
+      --border: #cbd5e1;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --accent: #0284c7;
+      --accent-glow: rgba(2, 132, 199, 0.15);
+      --green: #16a34a;
+      --red: #dc2626;
+      --amber: #d97706;
+    }
+    [data-theme="light"] header {
+      background: rgba(248, 250, 252, 0.85);
+    }
+    [data-theme="light"] .session-card {
+      background: #f8fafc;
+    }
+    [data-theme="light"] .screencast-container {
+      background: #e2e8f0;
+    }
+    [data-theme="light"] .screencast-header {
+      background: #e8edf4;
+    }
+    [data-theme="light"] .connect-box {
+      background: #1e293b;
+      color: #e2e8f0;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       background: var(--bg);
@@ -110,6 +138,16 @@ export function getDashboardHtml(port: number): string {
       display: grid;
       grid-template-columns: 340px 1fr;
       gap: 2rem;
+    }
+    @media (max-width: 768px) {
+      main {
+        grid-template-columns: 1fr;
+        padding: 1rem;
+      }
+      header { padding: 0.75rem 1rem; }
+      .nav-actions { gap: 0.5rem; }
+      .badge-oss { display: none; }
+      .session-list { max-height: 300px; }
     }
 
     .panel {
@@ -268,7 +306,9 @@ export function getDashboardHtml(port: number): string {
     </div>
     <div class="nav-actions">
       <button class="btn btn-outline" onclick="createNewSession()">+ New Session</button>
+      <button class="btn btn-outline" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>
       <a href="https://github.com/Abhaii11/open-browsergrid" target="_blank" class="btn btn-outline">GitHub</a>
+      <a href="/openapi.json" target="_blank" class="btn btn-outline" title="OpenAPI spec">API Spec</a>
     </div>
   </header>
 
@@ -316,6 +356,22 @@ export function getDashboardHtml(port: number): string {
     let sessions = [];
     const port = ${port};
     const wsUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/dashboard/ws';
+
+    // ── Theme toggle ──
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      document.getElementById('theme-toggle').textContent = theme === 'light' ? '🌙' : '☀️';
+      try { localStorage.setItem('obg-theme', theme); } catch {}
+    }
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      applyTheme(current === 'dark' ? 'light' : 'dark');
+    }
+    // Restore saved preference
+    try {
+      const saved = localStorage.getItem('obg-theme');
+      if (saved === 'light' || saved === 'dark') applyTheme(saved);
+    } catch {}
 
     const snippets = {
       playwright: \`import { chromium } from 'playwright';

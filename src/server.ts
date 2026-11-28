@@ -1,9 +1,11 @@
 import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
+import { getDebuggerUrl, sendCdpCommand } from './cdpClient.js';
 import { resolveGridConfig } from './config.js';
 import { getDashboardHtml } from './dashboard.js';
 import { createLogger, type Logger } from './logger.js';
+import { getOpenApiSpec } from './openapi.js';
 import { SessionManager, type SessionManagerDeps } from './sessionManager.js';
 import {
   InvalidSessionIdError,
@@ -282,6 +284,12 @@ export function createGridServer(userConfig: GridConfig, deps: GridServerDeps = 
       return;
     }
 
+    if (pathname === '/openapi.json' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getOpenApiSpec(boundPort), null, 2));
+      return;
+    }
+
     if ((pathname === '/health' || pathname === '/api/health') && req.method === 'GET') {
       const stats = sessionManager.getStats();
       sendJson(res, 200, {
@@ -340,13 +348,96 @@ export function createGridServer(userConfig: GridConfig, deps: GridServerDeps = 
     }
 
     if (pathname.startsWith('/api/sessions/')) {
-      const sessionId = pathname.slice('/api/sessions/'.length).split('/')[0];
+      const afterPrefix = pathname.slice('/api/sessions/'.length);
+      const sessionId = afterPrefix.split('/')[0];
+      const subpath = afterPrefix.slice(sessionId.length); // e.g. '/screenshot' or '/execute' or ''
+
       if (!sessionId) {
         sendJson(res, 400, { error: 'Missing session ID' });
         return;
       }
 
-      if (req.method === 'GET') {
+      // GET /api/sessions/:id/screenshot — capture PNG via CDP
+      if (subpath === '/screenshot' && req.method === 'GET') {
+        const session = sessionManager.getSession(sessionId);
+        if (!session) {
+          sendJson(res, 404, { error: `Session ${sessionId} not found` });
+          return;
+        }
+        if (session.status !== 'ready' && session.status !== 'active') {
+          sendJson(res, 503, {
+            error: `Session ${sessionId} is not ready (status: ${session.status})`,
+          });
+          return;
+        }
+        try {
+          const debuggerUrl = await getDebuggerUrl(session.cdpPort);
+          const result = (await sendCdpCommand(debuggerUrl, 'Page.captureScreenshot', {
+            format: 'png',
+            fromSurface: true,
+          })) as { data: string };
+          const imgBuf = Buffer.from(result.data, 'base64');
+          res.writeHead(200, {
+            'Content-Type': 'image/png',
+            'Content-Length': imgBuf.length,
+            'Cache-Control': 'no-cache',
+          });
+          res.end(imgBuf);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn('Screenshot failed', { sessionId, err });
+          sendJson(res, 503, { error: `Screenshot failed: ${message}` });
+        }
+        return;
+      }
+
+      // POST /api/sessions/:id/execute — run arbitrary CDP command
+      if (subpath === '/execute' && req.method === 'POST') {
+        const session = sessionManager.getSession(sessionId);
+        if (!session) {
+          sendJson(res, 404, { error: `Session ${sessionId} not found` });
+          return;
+        }
+        if (session.status !== 'ready' && session.status !== 'active') {
+          sendJson(res, 503, {
+            error: `Session ${sessionId} is not ready (status: ${session.status})`,
+          });
+          return;
+        }
+        let body: Record<string, unknown>;
+        try {
+          body = await readJsonBody(req);
+        } catch (err: unknown) {
+          sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          return;
+        }
+        if (!body.method || typeof body.method !== 'string') {
+          sendJson(res, 400, { error: 'Field "method" is required and must be a string' });
+          return;
+        }
+        const rawTimeout = body.timeoutMs;
+        const timeoutMs =
+          typeof rawTimeout === 'number' && Number.isFinite(rawTimeout) && rawTimeout >= 100
+            ? Math.min(Math.floor(rawTimeout), 30_000)
+            : 10_000;
+        const params =
+          body.params && typeof body.params === 'object' && !Array.isArray(body.params)
+            ? (body.params as Record<string, unknown>)
+            : {};
+        try {
+          const debuggerUrl = await getDebuggerUrl(session.cdpPort);
+          const result = await sendCdpCommand(debuggerUrl, body.method, params, timeoutMs);
+          sendJson(res, 200, { result });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn('CDP execute failed', { sessionId, method: body.method, err });
+          sendJson(res, 503, { error: `CDP execute failed: ${message}` });
+        }
+        return;
+      }
+
+      // GET /api/sessions/:id
+      if (!subpath && req.method === 'GET') {
         const summary = sessionManager.getSessionSummary(sessionId);
         if (summary) {
           sendJson(res, 200, summary);
@@ -356,7 +447,8 @@ export function createGridServer(userConfig: GridConfig, deps: GridServerDeps = 
         return;
       }
 
-      if (req.method === 'DELETE') {
+      // DELETE /api/sessions/:id
+      if (!subpath && req.method === 'DELETE') {
         const success = await sessionManager.closeSession(sessionId);
         if (success) {
           sendJson(res, 200, { message: `Session ${sessionId} closed` });
